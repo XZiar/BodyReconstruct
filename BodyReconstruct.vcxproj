@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="shapemodel\cshapepose.cpp" />
+    <ClCompile Include="shapemodel\CTMesh-30DOF.cpp" />
+    <ClCompile Include="shapemodel\NMath.cpp" />
+    <ClCompile Include="shapemodel\NRBM.cpp" />
+    <ClCompile Include="shapemodel\paramMap.cpp" />
+    <ClCompile Include="shapemodel\Show.cpp" />
+    <ClCompile Include="src\fitMesh.cpp" />
+    <ClCompile Include="src\tools.cpp" />
+    <ClCompile Include="Y:\BodyReconstruct\src\kdNNTree.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\fitMesh.h" />
+    <ClInclude Include="include\miniBLAS.hpp" />
+    <ClInclude Include="include\tools.h" />
+    <ClInclude Include="main.h" />
+    <ClInclude Include="shapemodel\cshapepose.h" />
+    <ClInclude Include="Y:\BodyReconstruct\include\kdNNTree.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="BodyReconstruct.pro" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{61419cec-8dbf-400a-8484-3496b162d8c6}</ProjectGuid>
+    <Keyword>Linux</Keyword>
+    <RootNamespace>BodyReconstruct</RootNamespace>
+    <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
+    <ApplicationType>Linux</ApplicationType>
+    <ApplicationTypeRevision>1.0</ApplicationTypeRevision>
+    <TargetLinuxPlatform>Generic</TargetLinuxPlatform>
+    <LinuxProjectType>{FC1A4D80-50E9-41DA-9192-61C0DBAA00D2}</LinuxProjectType>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <ConfigurationType>Makefile</ConfigurationType>
+    <RemoteRootDir>/mnt/hgfs/BodyReconstruct</RemoteRootDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <ConfigurationType>Makefile</ConfigurationType>
+    <RemoteRootDir>/mnt/hgfs/BodyReconstruct</RemoteRootDir>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make</RemoteBuildCommandLine>
+    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean; make</RemoteReBuildCommandLine>
+    <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean</RemoteCleanCommandLine>
+    <NMakeIncludeSearchPath>Z:\include;Z:\include\c++\5;Z:\include\c++\5\backward;Z:\include\x86_64-linux-gnu;Z:\include\x86_64-linux-gnu\c++\5;Z:\local\include;Z:\local\include\pcl-1.8;Z:\local\include\eigen3;Z:\local\include\vtk-7.0;$(ProjectDir)include;$(ProjectDir)shapemodel;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
+    <NMakeForcedIncludes>$(VISUALGDB_DIR)\gcc_compat.h;$(ProjectDir)gcc_Debug.h</NMakeForcedIncludes>
+    <LocalRemoteCopySources>false</LocalRemoteCopySources>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make</RemoteBuildCommandLine>
+    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean; make</RemoteReBuildCommandLine>
+    <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean</RemoteCleanCommandLine>
+    <NMakeIncludeSearchPath>Z:\include;Z:\include\c++\5;Z:\include\c++\5\backward;Z:\include\x86_64-linux-gnu;Z:\include\x86_64-linux-gnu\c++\5;Z:\local\include;Z:\local\include\pcl-1.8;Z:\local\include\eigen3;Z:\local\include\vtk-7.0;$(ProjectDir)include;$(ProjectDir)shapemodel;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
+    <NMakeForcedIncludes>$(VISUALGDB_DIR)\gcc_compat.h;$(ProjectDir)gcc_Release.h</NMakeForcedIncludes>
+    <LocalRemoteCopySources>false</LocalRemoteCopySources>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <RemotePreBuildEvent>
+      <Command>cd $(RemoteRootDir)/BodyReconstruct-Debug; qmake $(RemoteProjectDir)/BodyReconstruct.pro -r -spec linux-g++ CONFIG+=debug CONFIG+=qml_debug</Command>
+      <Message>qmake</Message>
+    </RemotePreBuildEvent>
+    <RemotePostBuildEvent>
+      <Command>cp $(RemoteRootDir)/BodyReconstruct-Debug/$(ProjectName) ~/projects/$(ProjectName)</Command>
+    </RemotePostBuildEvent>
+    <RemotePostBuildEvent>
+      <Message>copy application</Message>
+    </RemotePostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <RemotePreBuildEvent>
+      <Command>cd $(RemoteRootDir)/BodyReconstruct-Debug; qmake $(RemoteProjectDir)/BodyReconstruct.pro -r -spec linux-g++ CONFIG+=debug CONFIG+=qml_debug</Command>
+      <Message>qmake</Message>
+    </RemotePreBuildEvent>
+    <RemotePostBuildEvent>
+      <Command>cp $(RemoteRootDir)/BodyReconstruct-Debug/$(ProjectName) ~/projects/$(ProjectName)</Command>
+    </RemotePostBuildEvent>
+    <RemotePostBuildEvent>
+      <Message>copy application</Message>
+    </RemotePostBuildEvent>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

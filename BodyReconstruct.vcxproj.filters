@@ -1,0 +1,78 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="header files">
+      <UniqueIdentifier>{ddc9332f-6b2c-4724-97bb-0d03536bf75f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source files">
+      <UniqueIdentifier>{78e15d56-d151-4829-a689-f2d76a21dd62}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="header files\include">
+      <UniqueIdentifier>{3a03ac4f-af6d-4fd1-9939-56b1b021baa1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="header files\shapemodel">
+      <UniqueIdentifier>{5a174fb1-8287-4e27-86f1-b4b16a8bad94}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source files\src">
+      <UniqueIdentifier>{5074bbe7-d51a-4a08-93fe-2df408597d27}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source files\shapemodel">
+      <UniqueIdentifier>{b6430672-52d8-42b9-9b76-4887820e9a0b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>source files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\fitMesh.cpp">
+      <Filter>source files\src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\tools.cpp">
+      <Filter>source files\src</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\cshapepose.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\CTMesh-30DOF.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\NMath.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\NRBM.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\paramMap.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="shapemodel\Show.cpp">
+      <Filter>source files\shapemodel</Filter>
+    </ClCompile>
+    <ClCompile Include="Y:\BodyReconstruct\src\kdNNTree.cpp">
+      <Filter>source files\src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\fitMesh.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\tools.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+    <ClInclude Include="shapemodel\cshapepose.h">
+      <Filter>header files\shapemodel</Filter>
+    </ClInclude>
+    <ClInclude Include="main.h">
+      <Filter>header files</Filter>
+    </ClInclude>
+    <ClInclude Include="Y:\BodyReconstruct\include\kdNNTree.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\miniBLAS.hpp">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="BodyReconstruct.pro" />
+  </ItemGroup>
+</Project>
