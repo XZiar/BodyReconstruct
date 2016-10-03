@@ -923,7 +923,7 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
 	double *pTheta = theta.memptr();
 	for (uint32_t i = 0; i < rowcnt; i++)
     {
-		*pRes = *pTheta >= mincos ? 1 : 0;
+		*pRes++ = *pTheta++ >= mincos ? 1 : 0;
     }
     return result;
 }
@@ -1042,7 +1042,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 		scanbody.nntree.search(tpPoints.get(), tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
-		printf("bruteKNN uses %lld ms.\n", t2 - t1);
+		printf("sse4KNN uses %lld ms.\n", t2 - t1);
 	}
 
 	if (idxsNN.rows != tempbody.nPoints)
@@ -1140,7 +1140,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 		{
 			type = 1;
 			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "bruteKNN");
+			strcpy(name, "sse4KNN");
 			fwrite(name, sizeof(name), 1, fp);
 			cnt = tempbody.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);

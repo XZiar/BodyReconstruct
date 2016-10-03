@@ -29,7 +29,7 @@ public:
 
 inline uint8_t kdNNTree::judgeIdx(const miniBLAS::Vertex& v) const
 {
-	const uint8_t idx = ((*(int*)&v.x & 0x80000000) >> 29) /*+ ((*(int*)&v.y & 0x80000000) >> 30)*/ + ((*(int*)&v.z & 0x80000000) >> 31);
+	const uint8_t idx = ((v.int_x >> 29) & 0b100) /*+ ((v.int_y >> 30) & 0b10) */ + ((v.int_z >> 31) & 0b1);
 	return idx;
 }
 

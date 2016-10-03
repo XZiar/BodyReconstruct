@@ -22,7 +22,7 @@ arma::mat ctools::calcTrans2D(arma::mat src, arma::mat dst)
     arma::mat H;
     H=H.zeros(src.n_cols,4);
     dst = dst.t();
-    for(int i=0;i<src.n_cols/2;i++)
+	for (uint32_t i = 0; i < src.n_cols / 2; i++)
     {
         H(2*i,0)=src(0,2*i);
         H(2*i,1)=src(0,2*i+1);
@@ -61,7 +61,7 @@ arma::mat ctools::calcTransAffine2D(arma::mat src, arma::mat dst)
     arma::mat H;
     H=H.zeros(src.n_cols,6);
     dst = dst.t();
-    for(int i=0;i<src.n_cols/2;i++)
+	for (uint32_t i = 0; i < src.n_cols / 2; i++)
     {
         H(2*i,0)=src(0,2*i);
         H(2*i,1)=src(0,2*i+1);
@@ -174,10 +174,10 @@ vector<int> ctools::calcHist(arma::mat data, int binNum)
     max_v(0,0) = -255;
     min_v(0,0) = 255;
 
-    float step = (max_v(0,0)-min_v(0,0))/binNum-1;
-    for(int r=0;r<data.n_rows;r++)
+	const float step = (max_v(0, 0) - min_v(0, 0)) / binNum - 1;
+	for (uint32_t r = 0; r < data.n_rows; r++)
     {
-        for(int c=0;c<data.n_cols;c++)
+		for (uint32_t c = 0; c < data.n_cols; c++)
         {
             int idx = (data(r,c)-min_v(0,0))/step;
             hist[idx]++;
@@ -204,7 +204,7 @@ arma::mat ctools::calRotate2D(arma::mat src, arma::mat dst)
     lambda=0.00001*lambda.eye(2,2);//shrinkage matrix
     arma::mat H;
     H=H.zeros(src.n_cols*2,2);
-    for(int i=0;i<src.n_cols;i++)
+	for (uint32_t i = 0; i < src.n_cols; i++)
     {
         H(2*i,0)=src(0,i);
         H(2*i,1)=src(1,i);

@@ -68,9 +68,9 @@
     <LocalRemoteCopySources>false</LocalRemoteCopySources>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make</RemoteBuildCommandLine>
-    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean; make</RemoteReBuildCommandLine>
-    <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean</RemoteCleanCommandLine>
+    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make</RemoteBuildCommandLine>
+    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make clean; make</RemoteReBuildCommandLine>
+    <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make clean</RemoteCleanCommandLine>
     <NMakeIncludeSearchPath>Z:\include;Z:\include\c++\5;Z:\include\c++\5\backward;Z:\include\x86_64-linux-gnu;Z:\include\x86_64-linux-gnu\c++\5;Z:\local\include;Z:\local\include\pcl-1.8;Z:\local\include\eigen3;Z:\local\include\vtk-7.0;$(ProjectDir)include;$(ProjectDir)shapemodel;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
     <NMakeForcedIncludes>$(VISUALGDB_DIR)\gcc_compat.h;$(ProjectDir)gcc_Release.h</NMakeForcedIncludes>
     <LocalRemoteCopySources>false</LocalRemoteCopySources>
@@ -81,7 +81,7 @@
       <Message>qmake</Message>
     </RemotePreBuildEvent>
     <RemotePostBuildEvent>
-      <Command>cp $(RemoteRootDir)/BodyReconstruct-Debug/$(ProjectName) ~/projects/$(ProjectName)</Command>
+      <Command>cp $(RemoteRootDir)/BodyReconstruct-Debug/$(ProjectName) ~/projects/$(ProjectName)-Debug</Command>
     </RemotePostBuildEvent>
     <RemotePostBuildEvent>
       <Message>copy application</Message>
@@ -89,11 +89,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <RemotePreBuildEvent>
-      <Command>cd $(RemoteRootDir)/BodyReconstruct-Debug; qmake $(RemoteProjectDir)/BodyReconstruct.pro -r -spec linux-g++ CONFIG+=debug CONFIG+=qml_debug</Command>
+      <Command>cd $(RemoteRootDir)/BodyReconstruct-Release; qmake $(RemoteProjectDir)/BodyReconstruct.pro -r -spec linux-g++ CONFIG+=release</Command>
       <Message>qmake</Message>
     </RemotePreBuildEvent>
     <RemotePostBuildEvent>
-      <Command>cp $(RemoteRootDir)/BodyReconstruct-Debug/$(ProjectName) ~/projects/$(ProjectName)</Command>
+      <Command>cp $(RemoteRootDir)/BodyReconstruct-Release/$(ProjectName) ~/projects/$(ProjectName)-Release</Command>
     </RemotePostBuildEvent>
     <RemotePostBuildEvent>
       <Message>copy application</Message>
