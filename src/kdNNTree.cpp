@@ -14,7 +14,7 @@ void kdNNTree::init(const arma::mat& points)
 		t.reserve(cnt / 8);
 	}
 	
-	const double *px = points.memptr(), *py = px + cnt, *pz = py + cnt;
+	const double *__restrict px = points.memptr(), *__restrict py = px + cnt, *__restrict pz = py + cnt;
 	for (uint32_t i = 0; i < cnt; ++i)
 	{
 		const Vertex v(*px++, *py++, *pz++, (int32_t)i);
@@ -29,7 +29,7 @@ void kdNNTree::init(const arma::mat& points)
 	}
 }
 
-void kdNNTree::searchBasic(const Vertex* pVert, const uint32_t count, int *idxs, float *dists) const
+void kdNNTree::searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const
 {
 	const uint32_t cntV = (count + 3) / 4;
 	Vertex *tmp = new Vertex[cntV];
@@ -38,7 +38,7 @@ void kdNNTree::searchBasic(const Vertex* pVert, const uint32_t count, int *idxs,
 	{
 		float minval = 65536;
 		uint32_t minidx = 65536;
-		for (const auto& vBase : tree[judgeIdx(*pVert)])
+		for (const auto & __restrict vBase : tree[judgeIdx(*pVert)])
 		{
 			const float dis = (*pVert - vBase).length_sqr();
 			if (dis < minval)
@@ -57,12 +57,9 @@ void kdNNTree::searchBasic(const Vertex* pVert, const uint32_t count, int *idxs,
 	delete[] tmp;
 }
 
-void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *idxs, float *dists) const
+void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const
 {
-#ifdef USE_AVX2
-	throw std::exception("unimplement of AVX2 version of kdNNTree's search");
-#else
-#   ifdef USE_SSE4
+#ifdef USE_SSE4
 	const uint32_t cntV = (count + 3) / 4;
 	Vertex *tmp = new Vertex[cntV];
 	float *pFtmp = tmp[0];
@@ -72,17 +69,17 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *idxs, floa
 		const Vertex vObj = *pVert; const __m128 mObj = vObj;
 		//find proper subtree
 		const auto& part = tree[judgeIdx(vObj)];
-		const Vertex *pBase = &part[0];
+		const Vertex *__restrict pBase = &part[0];
 		//min dist * 4   AND   min idx * 4
 		__m128 min4 = _mm_set_ps1(1e10f); __m128i minpos4 = _mm_setzero_si128();
 
 		for (uint32_t b = part.size() / 4; b--; )
 		{
 			//calculate 4 vector represent point-Obj ---> point-Base
-			const Vertex vb1 = *pBase++; const __m128 a1 = _mm_sub_ps(mObj, vb1);
-			const Vertex vb2 = *pBase++; const __m128 a2 = _mm_sub_ps(mObj, vb2);
-			const Vertex vb3 = *pBase++; const __m128 a3 = _mm_sub_ps(mObj, vb3);
-			const Vertex vb4 = *pBase++; const __m128 a4 = _mm_sub_ps(mObj, vb4);
+			const Vertex vb1 = _mm_load_ps((const float*)(pBase++)); const __m128 a1 = _mm_sub_ps(mObj, vb1);
+			const Vertex vb2 = _mm_load_ps((const float*)(pBase++)); const __m128 a2 = _mm_sub_ps(mObj, vb2);
+			const Vertex vb3 = _mm_load_ps((const float*)(pBase++)); const __m128 a3 = _mm_sub_ps(mObj, vb3);
+			const Vertex vb4 = _mm_load_ps((const float*)(pBase++)); const __m128 a4 = _mm_sub_ps(mObj, vb4);
 			
 			//make up vector contain 4 dist data(dist^2)
 			const __m128 this4 = _mm_unpacklo_ps
@@ -125,7 +122,7 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *idxs, floa
 			// final result may contain multi "1"(means min) when some dists are the same
 			// so need to use bit scan to find a pos(whatever pos)
 		#if defined(__GNUC__)
-			int idx = _bit_scan_forward(res);
+			const int idx = _bit_scan_forward(res);
 		#else
 			unsigned long idx;
 			_BitScanForward(&idx, res);
@@ -140,13 +137,12 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *idxs, floa
 		}
 	}
 	Vertex *pTmp = tmp;
-	for (uint32_t a = 0; a < cntV; ++a, ++pTmp)
+	for (uint32_t a = cntV; a--; ++pTmp)
 		(*pTmp).do_sqrt();
 	memcpy(dists, tmp, count * sizeof(float));
 	delete[] tmp;
-#   else
+#else
 	search(pVert, count, idxs, dists);
-#   endif
 #endif
 }
 

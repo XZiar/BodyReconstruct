@@ -8,7 +8,6 @@
 
 #include "kdNNTree.h"
 
-
 #include <dlib/optimization.h>
 
 #define POSPARAM_NUM 31

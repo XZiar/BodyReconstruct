@@ -51,19 +51,12 @@ public:
 		t1 = getCurTime();
 
 		arma::mat pointsSM, jointsSM;
-		/*
-		arma::mat poseParam_(1, POSPARAM_NUM);
-		for (int i = 0; i<POSPARAM_NUM; i++)
-		{
-			poseParam_(0, i) = pose[i];
-		}
-		shapepose_->getModel(shapeParam_, poseParam_, pointsSM, jointsSM);
-		*/
+
 		shapepose_->getModel(shapeParam_.memptr(), pose, pointsSM, jointsSM);
 		// pointsSM *= scale[0];
 
-		auto *pValid = isValidNN_.memptr();
-		const uint32_t *pIdx = idxNN_.ptr<uint32_t>(0);
+		auto *__restrict pValid = isValidNN_.memptr();
+		const uint32_t *__restrict pIdx = idxNN_.ptr<uint32_t>(0);
 		for (int j = 0, i = 0; j<idxNN_.rows; ++j, ++pIdx)
 		{
 			if (*pValid++)
@@ -111,14 +104,7 @@ public:
 		t1 = getCurTime();
 
 		arma::mat pointsSM, jointsSM;
-		/*
-		arma::mat shapeParam_(1, SHAPEPARAM_NUM);
-		for (int i = 0; i<SHAPEPARAM_NUM; i++)
-		{
-			shapeParam_(0, i) = shape[i];
-		}
-		shapepose_->getModel(shapeParam_, poseParam_, pointsSM, jointsSM);
-		*/
+
 		shapepose_->getModel(shape, poseParam_.memptr(), pointsSM, jointsSM);
 		pointsSM *= scale_;
 		// double s = 0.0;
@@ -254,15 +240,16 @@ static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const
         cloud->push_back(color);
     });
 }
+
 static cv::Mat armaTOcv(const arma::mat in)
 {
     cv::Mat out(in.n_rows, in.n_cols, CV_32FC1);
-    float *pOut = out.ptr<float>(0);
-    const double *pIn = in.memptr();
+    float *__restrict const pOut = out.ptr<float>(0);
+    const double *__restrict pIn = in.memptr();
     const uint32_t step = in.n_cols;
     for(uint32_t off = 0; off < in.n_cols; ++off)
     {
-        float *ptr = pOut + off;
+        float *__restrict ptr = pOut + off;
         for(uint32_t a = 0; a < in.n_rows; ++a)
         {
             *ptr = (float)*(pIn++);
@@ -283,10 +270,10 @@ static shared_ptr<Vertex> armaTOcache(const arma::mat in)
 {
 	const uint32_t cnt = in.n_rows;
 
-	Vertex *pVert = (Vertex*)malloc_align(sizeof(Vertex) * cnt, 32);
+	Vertex *__restrict pVert = (Vertex*)malloc_align(sizeof(Vertex) * cnt, 32);
 	shared_ptr<Vertex> cache(pVert, [=](Vertex* ptr) { free_align(ptr); });
 
-	const double *px = in.memptr(), *py = px + cnt, *pz = py + cnt;
+	const double *__restrict px = in.memptr(), *__restrict py = px + cnt, *__restrict pz = py + cnt;
 	for (uint32_t i = 0; i < cnt; ++i)
 		*pVert++ = Vertex(*px++, *py++, *pz++);
 
@@ -356,9 +343,6 @@ double fitMesh::shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape)
 
 CShapePose fitMesh::shapepose;
 CTemplate fitMesh::tempbody;
-//CScan fitMesh::scanbody;
-//cv::Mat fitMesh::idxsNN_ = cv::Mat(1, 1, CV_32FC1);
-//arColIS fitMesh::isValidNN_ = arma::zeros<arColIS>(1, 1);
 
 fitMesh::fitMesh()
 {
@@ -818,13 +802,11 @@ void fitMesh::fitShapePose()
     double eps_err = 1e-3;
     double errPrev = 0;
     double err=0;
-    //cv::Mat idxsNN(1,1,CV_32S);
-    //arColIS isValidNN;
 
 	cv::Mat pointscv = armaTOcv(scanbody.points);
 	cv::flann::KDTreeIndexParams indexParams(8);
 	scanbody.kdtree = new cv::flann::Index(pointscv, indexParams);
-	cout << "kd tree build, scan points number: " << pointscv.rows << endl;
+	cout << "cv kd tree build, scan points number: " << pointscv.rows << endl;
 
 	updatePoints(idxsNN_, isValidNN_, scale, err);
     showResult(false);
@@ -923,8 +905,8 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
 
     const double mincos = cos(3.1415926 * angle_thres/180);
     arma::vec theta = sum(normals_knn % normals_tmp, 1);
-	auto *pRes = result.memptr();
-	double *pTheta = theta.memptr();
+	auto *__restrict pRes = result.memptr();
+	const double *__restrict pTheta = theta.memptr();
 	for (uint32_t i = 0; i < rowcnt; i++)
     {
 		*pRes++ = *pTheta++ >= mincos ? 1 : 0;
@@ -935,12 +917,6 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
 void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale)
 {
 	double *pose = poseParam.memptr();
-    /*
-    double pose[POSPARAM_NUM];
-    //Initialization
-    for(int l=0;l<POSPARAM_NUM;l++)
-        pose[l]=poseParam(0,l);
-    */
 
     cout<<"construct problem: pose\n";
 	Problem problem;
@@ -964,12 +940,7 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
 	runcnt.store(0);
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
-    /*
-	for(int i=0;i<POSPARAM_NUM;i++)
-    {
-        poseParam(0,i) = pose[i];
-    }
-	*/
+
     cout << summary.BriefReport() << "\n";
 	const uint32_t rt = runtime, rc = runcnt;
 	printf("poseCost invoked %d times, avg %d ms\n", rc, rt / rc);
@@ -977,10 +948,14 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
 
 void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam,double &scale)
 {
+	double *shape = shapeParam.memptr();
+	/*
     double shape[SHAPEPARAM_NUM];
     //Initialization
     for(int l=0;l<SHAPEPARAM_NUM;l++)
         shape[l]=shapeParam(0,l);
+	*/
+
     Problem problem;
 	cout << "construct problem: SHAPE\n";
 
@@ -1010,7 +985,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     cout<<"estimated shape params: ";
     for(int i=0;i<SHAPEPARAM_NUM;i++)
     {
-        shapeParam(0,i)=shape[i];
+        //shapeParam(0,i)=shape[i];
         cout<<shape[i]<<" ";
     }
 	printf("scale %f\n", scale);
@@ -1060,7 +1035,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 
 	//get the normal of the 1-NN point in scan data
 	arma::mat normals_knn(tempbody.nPoints, 3, arma::fill::zeros);
-	int *pNN = idxsNN.ptr<int>(0);
+	const int *__restrict pNN = idxsNN.ptr<int>(0);
 	for (uint32_t i = 0; i < tempbody.nPoints; i++, ++pNN)
 	{
 		const int idx = *pNN;
