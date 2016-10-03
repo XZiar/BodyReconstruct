@@ -1448,6 +1448,17 @@ int CMesh::shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMat
 	return true;
 }
 
+void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn)
+{
+	const auto nPoints = mPoints.size();
+	for (uint32_t col = 0; col < 3; col++)
+		for (uint32_t row = 0; row < nPoints; row++)
+			for (uint32_t i = 0; i < numEigenVectors; i++)
+			{
+				(mPoints[row])[col] += shapeParamsIn[i] * SKEL_SCALE_FACTOR * (*eigenVectorsIn++);
+			}
+}
+
 int CMesh::updateJntPos()
 {
 	// cout << "\nUpdating Joints.. ";	

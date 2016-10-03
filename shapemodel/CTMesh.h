@@ -98,6 +98,7 @@ public:
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
+	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	int updateJntPos();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints);

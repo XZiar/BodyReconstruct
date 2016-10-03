@@ -90,9 +90,11 @@ private:
 	void rigidAlignTemplate2ScanLandmarks();
 	void fitModel();
 	void fitShapePose();
-	arColIS checkAngle(const arma::mat &normals_knn, const arma::mat &normals_tmp, const double angle_thres);
-	void solvePose(cv::Mat &idxNN, arColIS &isValidNN, arma::mat &poseParam, arma::mat &shapeParam, double &scale);
-	void solveShape(cv::Mat &idxNN, arColIS &isValidNN, arma::mat &poseParam, arma::mat &shapeParam, double &scale);
+	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
+	//基于ceres求解
+	void solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale);
+	//基于ceres求解
+	void solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
 	void updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
 	void solvePose_dlib();
 	void solveShape_dlib();
