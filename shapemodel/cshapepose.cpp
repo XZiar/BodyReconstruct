@@ -112,6 +112,47 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	return 0;
 }
 
+void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut)
+{
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const uint32_t numEigenVectors = evectors.n_rows;
+	
+	// Read object model
+	CMesh initMesh = initMesh_bk;
+	initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
+
+	// update joints
+	initMesh.updateJntPos();
+
+	// read motion params from the precomputed 3D poses
+	const uint32_t numMotionParams = 31;
+	CVector<double> mParams(numMotionParams);
+	for (uint32_t i = 0; i < numMotionParams; i++)
+	{
+		mParams(i) = poseParamsIn[i];
+	}
+	CMatrix<float> mRBM(4, 4);
+	NRBM::RVT2RBM(&mParams, mRBM);
+
+	CVector<CMatrix<float> > M(initMesh.joints() + 1);
+	CVector<float> TW(initMesh.joints() + 6);
+	for (int j = 6; j < mParams.size(); ++j)
+	{
+		TW(j) = (float)mParams(j);
+	}
+	initMesh.angleToMatrix(mRBM, TW, M);
+
+	// rotate joints
+	initMesh.rigidMotion(M, TW, true, true);
+
+	// Fill in resulting points array
+	const int nPoints = initMesh.GetPointSize();
+	for (int i = 0; i < nPoints; pointsOut += 4)
+	{
+		initMesh.GetPoint3(i++, pointsOut);
+	}
+}
+
 void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/

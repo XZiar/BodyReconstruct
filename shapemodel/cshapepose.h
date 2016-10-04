@@ -3,7 +3,6 @@
 #define CSHAPEPOSE_H
 
 #include "main.h"
-
 #include "CTMesh.h"
 
 #define SMOOTHMODEL true
@@ -20,6 +19,7 @@ public:
 	bool isFastChange = true;
 	CShapePose();
 
+	void getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut);
 	void getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints);
 	void getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints);
 	void setEvectors(arma::mat &evectorsIn);

@@ -156,6 +156,7 @@ public:
 	bool isNeighbor(int i, int j) { return mNeighbor(mJointMap(i), mJointMap(j)); };
 	bool isEndJoint(int aJointID) { return mEndJoint[aJointID]; }
 
+	inline void GetPoint3(const int i, float *__restrict ptr);
 	inline void GetPoint(int i, float& x, float& y, float& z);
 	inline void GetPoint(int i, float& x, float& y, float& z, int& j);
 	inline void GetPoint(int i, float& x, float& y, float& z, float& j);
@@ -301,6 +302,14 @@ inline void CMesh::projectPoint(CMatrix<float>& P, float X, float Y, float Z, fl
 	float invhz = 1.0 / hz;
 	x = hx*invhz;
 	y = hy*invhz;
+}
+
+inline void CMesh::GetPoint3(const int i, float *__restrict ptr)
+{
+	const float *src = mPoints[i].data();
+	*ptr++ = *src++;
+	*ptr++ = *src++;
+	*ptr++ = *src++;
 }
 
 inline void CMesh::GetPoint(int i, float& x, float& y, float& z)

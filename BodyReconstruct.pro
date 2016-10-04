@@ -1,6 +1,6 @@
 TEMPLATE = app
 CONFIG += console
-CONFIG += c++11
+CONFIG += c++14
 CONFIG -= app_bundle
 CONFIG -= qt
 CONFIG += link_pkgconfig

@@ -1453,10 +1453,15 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 	const auto nPoints = mPoints.size();
 	for (uint32_t col = 0; col < 3; col++)
 		for (uint32_t row = 0; row < nPoints; row++)
+		{
+			float& obj = (mPoints[row])[col];
+			double adder = 0;
 			for (uint32_t i = 0; i < numEigenVectors; i++)
 			{
-				(mPoints[row])[col] += shapeParamsIn[i] * SKEL_SCALE_FACTOR * (*eigenVectorsIn++);
+				adder += shapeParamsIn[i] * SKEL_SCALE_FACTOR * (*eigenVectorsIn++);
 			}
+			obj += adder;
+		}
 }
 
 int CMesh::updateJntPos()
