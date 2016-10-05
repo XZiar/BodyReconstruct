@@ -17,20 +17,25 @@ class kdNNTree
 {
 private:
 	std::vector<Vertex> tree[8];
-	uint8_t judgeIdx(const Vertex& v) const;
+	int judgeIdx(const Vertex& v) const;
 public:
 	kdNNTree() = default;
 	~kdNNTree() = default;
 	void init(const arma::mat& points);
 	void searchBasic(const Vertex* pVert, const uint32_t count, int *idxs, float *dists) const;
+	void searchOld(const Vertex* pVert, const uint32_t count, int *idxs, float *dists) const;
 	void search(const Vertex* pVert, const uint32_t count, int *idxs, float *dists) const;
 };
 
 
-inline uint8_t kdNNTree::judgeIdx(const miniBLAS::Vertex& v) const
+inline int kdNNTree::judgeIdx(const Vertex& v) const
 {
-	const uint8_t idx = ((v.int_x >> 29) & 0b100) /*+ ((v.int_y >> 30) & 0b10) */ + ((v.int_z >> 31) & 0b1);
+#ifdef USE_SSE
+	return _mm_movemask_ps(v) & 0b0101;
+#else
+	const uint8_t idx = ((v.int_x >> 31) & 0b1) /*+ ((v.int_y >> 30) & 0b10) */ + ((v.int_z >> 29) & 0b100);
 	return idx;
+#endif
 }
 
 }

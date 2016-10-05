@@ -26,3 +26,4 @@
 
 
 uint64_t getCurTime();
+uint64_t getCurTimeNS();

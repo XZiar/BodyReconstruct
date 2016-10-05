@@ -1464,6 +1464,50 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
+void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+{
+	using miniBLAS::Vertex;
+	const uint32_t numEigenVectors = 20;
+	//row * col(3) * z(20 = 5Vertex)
+	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
+	
+	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
+	const auto nPoints = mPoints.size();
+	const Vertex *__restrict pEvec = eigenVectorsIn;
+	for (uint32_t row = 0; row < nPoints; row++)
+	{
+		float *__restrict pPvec = mPoints[row].data();
+		
+		const __m128 add01 = _mm_add_ps
+		(
+			_mm_loadu_ps(pPvec)/*x,y,z,?*/,
+			_mm_blend_ps(_mm_dp_ps(sp1, pEvec[0], 0b11110001)/*sx1,0,0,0*/, _mm_dp_ps(sp1, pEvec[5], 0b11110010)/*0,sy1,0,0*/, 0b10)/*sx1,sy1,0,0*/
+		);
+		const __m128 add23 = _mm_add_ps
+		(
+			_mm_blend_ps(_mm_dp_ps(sp2, pEvec[1], 0b11110001)/*sx2,0,0,0*/, _mm_dp_ps(sp2, pEvec[6], 0b11110010)/*0,sy2,0,0*/, 0b10)/*sx2,sy2,0,0*/,
+			_mm_blend_ps(_mm_dp_ps(sp3, pEvec[2], 0b11110001)/*sx3,0,0,0*/, _mm_dp_ps(sp3, pEvec[7], 0b11110010)/*0,sy3,0,0*/, 0b10)/*sx3,sy3,0,0*/
+		);
+		const __m128 add45 = _mm_add_ps
+		(
+			_mm_blend_ps(_mm_dp_ps(sp4, pEvec[3], 0b11110001)/*sx4,0,0,0*/, _mm_dp_ps(sp4, pEvec[8], 0b11110010)/*0,sy4,0,0*/, 0b10)/*sx4,sy4,0,0*/,
+			_mm_blend_ps(_mm_dp_ps(sp5, pEvec[4], 0b11110001)/*sx5,0,0,0*/, _mm_dp_ps(sp5, pEvec[9], 0b11110010)/*0,sy5,0,0*/, 0b10)/*sx5,sy5,0,0*/
+		);
+		const __m128 addz = _mm_add_ps
+		(
+			_mm_add_ps(_mm_dp_ps(sp1, pEvec[10], 0b11110100)/*0,0,sz1,0*/, _mm_dp_ps(sp2, pEvec[11], 0b11110100)/*0,0,sz2,0*/),
+			_mm_add_ps(_mm_dp_ps(sp3, pEvec[12], 0b11110100)/*0,0,sz3,0*/, _mm_dp_ps(sp4, pEvec[13], 0b11110100)/*0,0,sz4,0*/)
+		);
+		pEvec += 15;
+		const Vertex res = _mm_add_ps
+		(
+			_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/,
+			_mm_add_ps(_mm_add_ps(add01, add23), _mm_add_ps(add45, addz))
+		);
+		pPvec[0] = res.x, pPvec[1] = res.y, pPvec[2] = res.z;
+	}
+}
+
 int CMesh::updateJntPos()
 {
 	// cout << "\nUpdating Joints.. ";	

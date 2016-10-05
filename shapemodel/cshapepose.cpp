@@ -119,7 +119,68 @@ void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const doub
 	
 	// Read object model
 	CMesh initMesh = initMesh_bk;
+	//initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
+	miniBLAS::Vertex vShape[5];
+	{
+		float *__restrict pShape = vShape[0];
+		for (uint32_t a = 0; a < 20; ++a)
+			*pShape++ = shapeParamsIn[a];
+	}
+	initMesh.fastShapeChangesToMesh(vShape, evecCache);
+
+	// update joints
+	initMesh.updateJntPos();
+
+	// read motion params from the precomputed 3D poses
+	const uint32_t numMotionParams = 31;
+	CVector<double> mParams(numMotionParams);
+	for (uint32_t i = 0; i < numMotionParams; i++)
+	{
+		mParams(i) = poseParamsIn[i];
+	}
+	CMatrix<float> mRBM(4, 4);
+	NRBM::RVT2RBM(&mParams, mRBM);
+
+	CVector<CMatrix<float> > M(initMesh.joints() + 1);
+	CVector<float> TW(initMesh.joints() + 6);
+	for (int j = 6; j < mParams.size(); ++j)
+	{
+		TW(j) = (float)mParams(j);
+	}
+	initMesh.angleToMatrix(mRBM, TW, M);
+
+	// rotate joints
+	initMesh.rigidMotion(M, TW, true, true);
+
+	// Fill in resulting points array
+	const int nPoints = initMesh.GetPointSize();
+	for (int i = 0; i < nPoints; pointsOut += 4)
+	{
+		initMesh.GetPoint3(i++, pointsOut);
+	}
+}
+
+void CShapePose::getModelFastEx(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut)
+{
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const uint32_t numEigenVectors = evectors.n_rows;
+
+	// Read object model
+	CMesh initMesh = initMesh_bk;
+	miniBLAS::Vertex vShape[5];
+	{
+		float *pShape = vShape[0];
+		for (uint32_t a = 0; a < 20; ++a)
+			*pShape++ = shapeParamsIn[a];
+	}
+	uint64_t t1, t2, t3;
+	t1 = getCurTimeNS();
 	initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
+	t2 = getCurTimeNS();
+	initMesh.fastShapeChangesToMesh(vShape, evecCache);
+	t3 = getCurTimeNS();
+	printf("#$#$#$#$fastShapeChangesToMesh  COST\nOLD %lld ns, NEW %lld ns\n", t2 - t1, t3 - t2);
+	getchar();
 
 	// update joints
 	initMesh.updateJntPos();
@@ -195,5 +256,32 @@ void CShapePose::getModel(const arma::mat &shapeParam, const arma::mat &posePara
 
 void CShapePose::setEvectors(arma::mat &evectorsIn)
 {
+	using miniBLAS::Vertex;
 	evectors = evectorsIn;
+	if (evecCache != nullptr)
+	{
+		delete[] evecCache;
+	}
+	const uint32_t numEigenVectors = evectorsIn.n_rows;
+	if (numEigenVectors != 20)
+	{
+		printf("evecctors should be 20 for optimization.\n\n");
+		getchar();
+		exit(-1);
+	}
+	evecCache = new Vertex[evectorsIn.n_elem / 4];
+	float *pVert = evecCache[0];
+	//20 * x(rows*3)
+	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
+	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
+	for (uint32_t a = 0; a < rows; ++a)
+	{
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *px++;
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *py++;
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *pz++;
+	}
+
 }

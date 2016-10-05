@@ -26,6 +26,11 @@
 #include "Show.h"
 #include <string>
 
+#define USE_SSE
+#define USE_SSE2
+#define USE_SSE4
+#include "miniBLAS.hpp"
+
 #define NO_OF_EIGENVECTORS 20
 #define SKEL_SCALE_FACTOR 1.0
 
@@ -99,6 +104,7 @@ public:
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
+	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
 	int updateJntPos();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints);

@@ -22,10 +22,6 @@ using miniBLAS::Vertex;
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
-uint64_t getCurTime()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-}
 static const auto deletor = [=](Vertex* ptr) { free_align(ptr); };
 static unique_ptr<Vertex[], decltype(deletor)> armaTOcache(const arma::mat in)
 {
@@ -1079,6 +1075,14 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 #endif
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S);
 	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1);
+	if(false)
+	{
+		t1 = getCurTime();
+		auto tpPoints = armaTOcache(pointsSM);
+		scanbody.nntree.searchOld(tpPoints.get(), tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		t2 = getCurTime();
+		printf("sse4NN-OLD uses %lld ms.\n", t2 - t1);
+	}
 	{
 		t1 = getCurTime();
 
@@ -1086,7 +1090,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 		scanbody.nntree.search(tpPoints.get(), tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
-		printf("sse4KNN uses %lld ms.\n", t2 - t1);
+		printf("sse4NN uses %lld ms.\n", t2 - t1);
 	}
 
 	if (idxsNN.rows != tempbody.nPoints)
