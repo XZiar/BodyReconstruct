@@ -1477,7 +1477,10 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	for (uint32_t row = 0; row < nPoints; row++)
 	{
 		float *__restrict pPvec = mPoints[row].data();
-		
+		_mm_prefetch(pPvec + 15, _MM_HINT_NTA);
+		_mm_prefetch(pPvec + 19, _MM_HINT_NTA);
+		_mm_prefetch(pPvec + 23, _MM_HINT_NTA);
+		_mm_prefetch(pPvec + 27, _MM_HINT_NTA);
 		const __m128 add01 = _mm_add_ps
 		(
 			_mm_loadu_ps(pPvec)/*x,y,z,?*/,

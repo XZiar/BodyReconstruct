@@ -21,9 +21,10 @@ void kdNNTree::init(const arma::mat& points)
 	}
 
 	const Vertex empty(1e10f, 1e10f, 1e10f);
+	static const uint32_t minbase = 4;
 	for (auto& t : tree)
 	{
-		for (uint32_t a = t.size() % 8; a != 0 && a < 8; ++a)
+		for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
 			t.push_back(empty);
 	}
 }
@@ -183,12 +184,12 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *__restrict
 				_mm_movelh_ps(_mm_dp_ps(a2, a2, 0b01110010)/*0,i2,0,0*/, _mm_dp_ps(a4, a4, 0b01110010)/*0,i4,0,0*/)/*0,i2,0,i4*/,
 				0b1010
 			)/*i1,i2,i3,i4*/;
-			  //below is an old implement(slower due to less preferable of unpack)
-			  //__m128 this4 = _mm_unpacklo_ps
-			  //(
-			  //	_mm_insert_ps(_mm_dp_ps(a1, a1, 0b01110001)/*i1,0,0,0*/, _mm_dp_ps(a3, a3, 0b01110010)/*0,i3,0,0*/, 0b01011100)/*i1,i3,0,0*/,
-			  //	_mm_insert_ps(_mm_dp_ps(a2, a2, 0b01110001)/*i2,0,0,0*/, _mm_dp_ps(a4, a4, 0b01110010)/*0,i4,0,0*/, 0b01011100)/*i2,i4,0,0*/
-			  //)/*i1,i2,i3,i4*/;
+			//below is an old implement(slower due to less preferable of unpack)
+			//__m128 this4 = _mm_unpacklo_ps
+			//(
+			//	_mm_insert_ps(_mm_dp_ps(a1, a1, 0b01110001)/*i1,0,0,0*/, _mm_dp_ps(a3, a3, 0b01110010)/*0,i3,0,0*/, 0b01011100)/*i1,i3,0,0*/,
+			//	_mm_insert_ps(_mm_dp_ps(a2, a2, 0b01110001)/*i2,0,0,0*/, _mm_dp_ps(a4, a4, 0b01110010)/*0,i4,0,0*/, 0b01011100)/*i2,i4,0,0*/
+			//)/*i1,i2,i3,i4*/;
 
 			  //find out which idx need to be updated and refresh min dist
 			const __m128 mask = _mm_cmplt_ps(this4, min4);
@@ -199,8 +200,6 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *__restrict
 			{
 				//make up vector contain 4 new idx from point-base's extra idx data
 				this4 = _mm_shuffle_ps(_mm_unpackhi_ps(vb1, vb2)/*x,x,i1,i2*/, _mm_unpackhi_ps(vb3, vb4)/*x,x,i3,i4*/, 0b11101110)/*i1,i2,i3,i4*/;
-				// below is an alternative implement(seems slower)
-				// this4 = _mm_shuffle_ps(_mm_movehl_ps(a1, a2)/*0,i2,0,i1*/, _mm_movehl_ps(a3, a4)/*0,i4,0,i3*/, 0b01110111)/*i1,i2,i3,i4*/;
 
 				//refresh min idx
 				minpos4 = _mm_blendv_ps(minpos4, this4, mask);
@@ -210,12 +209,9 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *__restrict
 		{
 			// find out whether each dist is the min among 4,
 			// consider they could be all the same so "less OR equal" should be used
-			const __m128 com1 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(1, 2, 3, 0))
-			);/*a<=b,b<=c,c<=d,d<=a*/
-			const __m128 com2 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(2, 3, 0, 1))
-			);/*a<=c,b<=d,c<=a,d<=b*/
-			const __m128 com3 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(3, 0, 1, 2))
-			);/*a<=d,b<=a,c<=b,d<=c*/
+			const __m128 com1 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(1, 2, 3, 0)) )/*a<=b,b<=c,c<=d,d<=a*/;
+			const __m128 com2 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(2, 3, 0, 1)) )/*a<=c,b<=d,c<=a,d<=b*/;
+			const __m128 com3 = _mm_cmple_ps(min4, _mm_shuffle_ps(min4, min4, _MM_SHUFFLE(3, 0, 1, 2)) )/*a<=d,b<=a,c<=b,d<=c*/;
 			const int res = _mm_movemask_ps(_mm_and_ps(_mm_and_ps(com1, com2), com3));
 			// final result may contain multi "1"(means min) when some dists are the same
 			// so need to use bit scan to find a pos(whatever pos)
