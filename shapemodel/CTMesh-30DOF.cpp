@@ -35,6 +35,7 @@ using std::endl;
 using std::string;
 using std::ifstream;
 using std::make_pair;
+using std::vector;
 // C J O I N T -----------------------------------------------------------------
 
 // constructor
@@ -1488,13 +1489,13 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+vector<miniBLAS::Vertex> CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
 {
 	using miniBLAS::Vertex;
 	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	
+	vector<Vertex> tmpPoints(mNumPoints);
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
 	const auto nPoints = mPoints.size();
 	const Vertex *__restrict pEvec = eigenVectorsIn;
@@ -1526,13 +1527,15 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 			_mm_add_ps(_mm_dp_ps(sp3, pEvec[12], 0b11110100)/*0,0,sz3,0*/, _mm_dp_ps(sp4, pEvec[13], 0b11110100)/*0,0,sz4,0*/)
 		);
 		pEvec += 15;
-		const Vertex res = _mm_add_ps
+		tmpPoints[row].assign(_mm_add_ps
 		(
 			_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/,
 			_mm_add_ps(_mm_add_ps(add01, add23), _mm_add_ps(add45, addz))
-		);
+		));
+		const Vertex& res = tmpPoints[row];
 		pPvec[0] = res.x, pPvec[1] = res.y, pPvec[2] = res.z;
 	}
+	return tmpPoints;
 }
 
 int CMesh::updateJntPos()
@@ -1559,8 +1562,6 @@ int CMesh::updateJntPos()
 
 				)
 			{
-				
-
 				bool anyMinIsNotZero = minMLab(weightMatrix, i0, i1, minEle);
 
 				if (anyMinIsNotZero)
@@ -1719,7 +1720,7 @@ static void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
 	sumVec(ptr, a, step + 1);
 }
 
-void CMesh::updateJntPosEx()
+void CMesh::updateJntPosEx(const std::vector<miniBLAS::Vertex>& ptCache)
 {
 	using miniBLAS::Vertex;
 	static const uint8_t idxmap[][3] = //i0,i1,i1*3
@@ -1728,13 +1729,6 @@ void CMesh::updateJntPosEx()
 
 	CMatrix<float> newJntPos; newJntPos.setSize(mJointNumber, 3); //3D joints
 	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
-
-	//prepare mPoints
-	Vertex *ptCache = new Vertex[mPoints.size()];
-	{
-		for (uint32_t a = 0; a < mPoints.size(); ++a)
-			ptCache[a].assign(mPoints[a].data());
-	}
 
 	uint32_t xgap = (mNumPoints + 3) / 4;
 	Vertex *wgtMin = new Vertex[xgap];
@@ -1756,8 +1750,8 @@ void CMesh::updateJntPosEx()
 			__m128 sum = _mm_setzero_ps();
 			{// componet_wise_mul_with_pnts and sum it
 				const float *pFMin = wgtMin[0];
-				const Vertex *__restrict pOri = ptCache;
-				for (uint32_t b = mPoints.size() / 3; b--; pFMin += 3, pOri += 3)
+				const Vertex *__restrict pOri = &ptCache[0];
+				for (uint32_t b = mNumPoints / 3; b--; pFMin += 3, pOri += 3)
 					sum = _mm_add_ps
 					(
 						_mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(pFMin[0]), pOri[0])),
@@ -1767,7 +1761,7 @@ void CMesh::updateJntPosEx()
 							_mm_mul_ps(_mm_set1_ps(pFMin[2]), pOri[2])
 						)
 					);
-				switch (mPoints.size() % 3)
+				switch (mNumPoints % 3)
 				{
 				case 1:
 					sum = _mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(*pFMin), *pOri));
@@ -1787,7 +1781,7 @@ void CMesh::updateJntPosEx()
 	}
 	delete[] wgtMin;
 
-	miniBLAS::Vertex sum(true);
+	const static Vertex sum(true);
 	newJntPos.putToY3(sum, 0, 0);
 
 	int parentMap[50]; // jNo=(jId -1) (to)---> parent jId
@@ -1812,28 +1806,15 @@ void CMesh::updateJntPosEx()
 	parentMap[24] = 24;
 	parentMap[25] = 25;
 
-	std::set<int> nonRoots; //has jId's
-
-	nonRoots.insert(3); nonRoots.insert(4);
-	nonRoots.insert(5); nonRoots.insert(7);
-	nonRoots.insert(8); nonRoots.insert(9);
-	nonRoots.insert(11); nonRoots.insert(12);
-	nonRoots.insert(15); nonRoots.insert(16);
-	nonRoots.insert(17); nonRoots.insert(20);
-	nonRoots.insert(21); nonRoots.insert(22);
-	nonRoots.insert(23); nonRoots.insert(24);
-	nonRoots.insert(25);
-
-	float tmp[3];
-	for (unsigned int i0 = 0; i0 < mJointNumber; i0++)
+	const static std::set<uint32_t> nonRoots{ 3,4,5,7,8,9,11,12,15,16,17,20,21,22,23,24,25 }; //has jId's
+	for (uint32_t i0 = 0; i0 < mJointNumber; i0++)
 	{
-		int jId = i0 + 1;
-		if (nonRoots.count(jId) != 0)
-		{	//non root joints
-
-			tmp[0] = newJntPos(i0, 0) = joints0(i0, (parentMap[i0] - 1) * 3 + 0);
-			tmp[1] = newJntPos(i0, 1) = joints0(i0, (parentMap[i0] - 1) * 3 + 1);
-			tmp[2] = newJntPos(i0, 2) = joints0(i0, (parentMap[i0] - 1) * 3 + 2);
+		if (nonRoots.count(i0 + 1))//non root joints
+		{	
+			const int tmp = (parentMap[i0] - 1) * 3;
+			newJntPos(i0, 0) = joints0(i0, tmp);
+			newJntPos(i0, 1) = joints0(i0, tmp + 1);
+			newJntPos(i0, 2) = joints0(i0, tmp + 2);
 		}
 	}
 	copyJointPos(1, 2, newJntPos);
@@ -1846,19 +1827,14 @@ void CMesh::updateJntPosEx()
 	copyJointPos(22, 6, newJntPos);
 	copyJointPos(23, 2, newJntPos);
 	copyJointPos(24, 10, newJntPos);
-
-	for (unsigned int i0 = 0; i0 < mJointNumber; i0++)
+	for (uint32_t i0 = 0; i0 < mJointNumber; i0++)
 	{
-		unsigned int jId = i0 + 1;
-		CVector<float> aDir = mJoint(jId).getDirection();
-		CVector<float> jPos; jPos.setSize(3);
-
+		CVector<float> jPos(3);
 		jPos(0) = newJntPos(i0, 0);
 		jPos(1) = newJntPos(i0, 1);
 		jPos(2) = newJntPos(i0, 2);
-		mJoint(jId).set(aDir, jPos);
+		mJoint(i0 + 1).setPoint(jPos);
 	}
-	delete[] ptCache;
 }
 
 bool CMesh::minMLab(CMatrix<float> weightMatrix, int i0, int i1, CVector<float> &minEle)

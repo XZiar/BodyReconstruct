@@ -126,10 +126,10 @@ void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const doub
 		for (uint32_t a = 0; a < 20; ++a)
 			*pShape++ = shapeParamsIn[a];
 	}
-	initMesh.fastShapeChangesToMesh(vShape, evecCache);
+	const auto ptCache = initMesh.fastShapeChangesToMesh(vShape, evecCache);
 
 	// update joints
-	initMesh.updateJntPosEx();
+	initMesh.updateJntPosEx(ptCache);
 
 	// read motion params from the precomputed 3D poses
 	const uint32_t numMotionParams = 31;
