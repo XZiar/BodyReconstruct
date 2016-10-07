@@ -131,6 +131,7 @@ public:
 
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
+	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);

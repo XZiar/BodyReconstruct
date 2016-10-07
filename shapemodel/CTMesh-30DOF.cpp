@@ -867,7 +867,6 @@ void CMesh::writeSkel(const char* aFilename)
 // rigidMotion
 void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth, bool force)
 {
-
 	CVector<float> a(4); a(3) = 1.0;
 	CVector<float> b(4);
 	// Apply motion to points
@@ -882,7 +881,6 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 	}
 	else
 	{
-
 		for (int i = 0; i < mNumPoints; i++)
 		{
 			a(0) = mPoints[i](0); a(1) = mPoints[i](1); a(2) = mPoints[i](2);
@@ -892,7 +890,94 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 			mPoints[i](0) = b(0); mPoints[i](1) = b(1); mPoints[i](2) = b(2);
 		}
 	}
+	// Apply motion to joints
+	for (int i = mJointNumber; i > 0; i--)
+	{
+		mJoint(i).rigidMotion(M(mJoint(i).mParent));
+	}
+	if (!smooth || force)
+	{
+		for (int j = 0; j < mBounds.xSize(); ++j)
+		{
+			int jID = (int)mBounds(j, 8, 0);
+			for (int i = 0; i < 8; ++i)
+			{
+				a(0) = mBounds(j, i, 0); a(1) = mBounds(j, i, 1); a(2) = mBounds(j, i, 2);
+				b = M(jID)*a;
+				mBounds(j, i, 0) = b(0); mBounds(j, i, 1) = b(1); mBounds(j, i, 2) = b(2);
+			}
+		}
+		mCenter = M(0)*mCenter;
+		// Sum up motion
+		mAccumulatedMotion.mRBM = M(0)*mAccumulatedMotion.mRBM;
+		mCurrentMotion.mRBM = M(0)*mCurrentMotion.mRBM;
+		// Correct pose parameters:
+		CVector<float> T1(6);
+		NRBM::RBM2Twist(T1, mCurrentMotion.mRBM);
+		for (int i = 0; i < 6; i++)
+			X(i) = T1(i) - mAccumulatedMotion.mPoseParameters(i);
+		mAccumulatedMotion.mPoseParameters += X;
+		mCurrentMotion.mPoseParameters += X;
+	}
+}
+void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth, bool force)
+{
+	using miniBLAS::Vertex;
+	Vertex(*Mvert)[3] = new Vertex[M.size()][3];
+	for (uint32_t a = 0; a < M.size(); ++a)
+	{
+		Vertex(&trans)[3] = Mvert[a];
+		const auto* obj = M[a].data();
+		trans[0].assign(obj);
+		trans[1].assign(obj + 4);
+		trans[2].assign(obj + 8);
+	}
+	// Apply motion to points
+	const __m128 mask = _mm_set1_ps(1);
+	if (!smooth || mNumSmooth == 1)
+	{
+		for (int i = 0; i < mNumPoints; i++)
+		{
+			float *__restrict pSrc = mPoints[i].data();
+			const __m128 src = _mm_loadu_ps(pSrc);
+			const Vertex(&trans)[3] = Mvert[int(pSrc[3])];
+			const __m128 dat = _mm_blend_ps(src, mask, 0b1000);
+			const __m128 res = _mm_blend_ps
+			(
+				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+				_mm_movehl_ps(src/*x',y',z',w*/, _mm_dp_ps(dat, trans[1], 0b11111000)/*0,0,0,y*/)/*0,y,z',w*/,
+				0b1010
+			);/*x,y,z,w*/
+			_mm_storeu_ps(pSrc, res);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < mNumPoints; i++)
+		{
+			float *__restrict pSrc = mPoints[i].data();
+			__m128 res = _mm_setzero_ps();
+			const __m128 src = _mm_loadu_ps(pSrc), dat = _mm_blend_ps(src, mask, 0b1000);
+			uint32_t idxT = 3, idxC = 4;
+			for (int n = 0; n < mNumSmooth; n++, idxT+=2, idxC+=2)
+			{
+				const Vertex(&trans)[3] = Mvert[int(pSrc[idxT])];
+				res = _mm_add_ps
+				(res, _mm_mul_ps
+					(_mm_set1_ps(pSrc[idxC]), _mm_blend_ps
+						(
+							_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+							_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+						)/*x,y,z,0*/
+					)
+				);
+			}
+			_mm_storeu_ps(pSrc, _mm_blend_ps(res, src, 0b1000)/*x,y,z,w*/);
+		}
+	}
 
+	CVector<float> a(4); a(3) = 1.0;
+	CVector<float> b(4);
 	// Apply motion to joints
 	for (int i = mJointNumber; i > 0; i--)
 	{

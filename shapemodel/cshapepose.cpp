@@ -150,7 +150,7 @@ void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const doub
 	initMesh.angleToMatrix(mRBM, TW, M);
 
 	// rotate joints
-	initMesh.rigidMotion(M, TW, true, true);
+	initMesh.rigidMotionEx(M, TW, true, true);
 
 	// Fill in resulting points array
 	const int nPoints = initMesh.GetPointSize();
