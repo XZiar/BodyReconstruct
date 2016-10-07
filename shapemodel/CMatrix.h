@@ -13,7 +13,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <queue>
+//#include <queue>
 #include <stack>
 #ifdef GNU_COMPILER
   #include <strstream>
@@ -156,10 +156,35 @@ public:
   void getVector(CVector<T>& aVector, int ay);
   // Gives access to the internal data representation
   inline T* data() const;
+
+
+  inline void sumToY3(T *pDest) const;
+  inline void putToY3(const T *__restrict pSrc, const uint32_t x, const uint32_t y);
 protected:
   int mXSize,mYSize;
   T *mData;
 };
+
+template <class T>
+inline void CMatrix<T>::sumToY3(T *pDest) const
+{
+	const float *__restrict px = mData, *__restrict py = mData + mXSize, *__restrict pz = mData + mXSize*2;
+	float x = 0, y = 0, z = 0;
+	for (uint32_t a = mXSize; a--;)
+	{
+		x += *px++; y += *py++; z += *pz++;
+	}
+	pDest[0] = x; pDest[1] = y; pDest[2] = z;
+}
+template <class T>
+inline void CMatrix<T>::putToY3(const T *__restrict pSrc, const uint32_t x, const uint32_t y)
+{
+	uint32_t base = y*mXSize + x;
+	mData[base] = pSrc[0];
+	mData[base + mXSize] = pSrc[1];
+	mData[base + mXSize * 2] = pSrc[2];
+}
+
 
 // Returns a matrix where all negative elements are turned positive
 template <class T> CMatrix<T> abs(const CMatrix<T>& aMatrix);

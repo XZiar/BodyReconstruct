@@ -106,6 +106,8 @@ public:
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
 	int updateJntPos();
+	void updateJntPosExT();
+	void updateJntPosEx();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints);
 	// constructor
@@ -246,6 +248,7 @@ protected:
 	CVector<CJoint>  mJoint;
 	//static std::vector<CMatrix<double> >  eigenVectors;
 	CMatrix<float> weightMatrix;
+	miniBLAS::Vertex *wgtMat = nullptr;
 
 	// Sure Fields before the Draping ...
 	// CVector<float>* mPointsS;
@@ -255,6 +258,7 @@ protected:
 	//~aj - small functions, can move elsewhere (think)
 	bool minMLab(CMatrix<float> weightMatrix, int i0, int i1, CVector<float> &minEle);
 	void componet_wise_mul_with_pnts(CVector<float> minEle, CMatrix<float> &tmp_wtMatrix);
+	void componet_wise_mul_with_pntsEx(const float *minEle, CMatrix<float> &tmp_wtMatrix);
 	double sumTheVector(CVector<float> minEle);
 	void sumTheMatrix(CMatrix<float> tmpMatrix, CVector<float> & t1);
 	bool copyMatColToVector(CMatrix<float> weightMatrix, int i0, CVector<float> &singleWts);

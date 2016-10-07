@@ -129,61 +129,7 @@ void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const doub
 	initMesh.fastShapeChangesToMesh(vShape, evecCache);
 
 	// update joints
-	initMesh.updateJntPos();
-
-	// read motion params from the precomputed 3D poses
-	const uint32_t numMotionParams = 31;
-	CVector<double> mParams(numMotionParams);
-	for (uint32_t i = 0; i < numMotionParams; i++)
-	{
-		mParams(i) = poseParamsIn[i];
-	}
-	CMatrix<float> mRBM(4, 4);
-	NRBM::RVT2RBM(&mParams, mRBM);
-
-	CVector<CMatrix<float> > M(initMesh.joints() + 1);
-	CVector<float> TW(initMesh.joints() + 6);
-	for (int j = 6; j < mParams.size(); ++j)
-	{
-		TW(j) = (float)mParams(j);
-	}
-	initMesh.angleToMatrix(mRBM, TW, M);
-
-	// rotate joints
-	initMesh.rigidMotion(M, TW, true, true);
-
-	// Fill in resulting points array
-	const int nPoints = initMesh.GetPointSize();
-	for (int i = 0; i < nPoints; pointsOut += 4)
-	{
-		initMesh.GetPoint3(i++, pointsOut);
-	}
-}
-
-void CShapePose::getModelFastEx(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut)
-{
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
-
-	// Read object model
-	CMesh initMesh = initMesh_bk;
-	miniBLAS::Vertex vShape[5];
-	{
-		float *pShape = vShape[0];
-		for (uint32_t a = 0; a < 20; ++a)
-			*pShape++ = shapeParamsIn[a];
-	}
-	uint64_t t1, t2, t3;
-	t1 = getCurTimeNS();
-	initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
-	t2 = getCurTimeNS();
-	initMesh.fastShapeChangesToMesh(vShape, evecCache);
-	t3 = getCurTimeNS();
-	printf("#$#$#$#$fastShapeChangesToMesh  COST\nOLD %lld ns, NEW %lld ns\n", t2 - t1, t3 - t2);
-	getchar();
-
-	// update joints
-	initMesh.updateJntPos();
+	initMesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	const uint32_t numMotionParams = 31;

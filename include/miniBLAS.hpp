@@ -82,6 +82,7 @@ public:
 	#endif
 	}
 	Vertex(const float x_, const float y_, const float z_, const float w_ = 0) :Vec4Base(x_, y_, z_, w_) { };
+	Vertex(const float *ptr) :Vec4Base(ptr[0], ptr[1], ptr[2]) { };
 	Vertex(const float x_, const float y_, const float z_, const int32_t w_) :Vec4Base(x_, y_, z_) { int_w = w_; };
 	Vertex(const __m128& dat) { float_dat = dat; };
 	operator float*() const { return (float *)&x; };
@@ -90,6 +91,18 @@ public:
 	float& operator[](uint32_t idx)
 	{
 		return ((float*)&x)[idx];
+	};
+	void assign(const float x_, const float y_, const float z_, const float w_ = 0) 
+	{
+		x = x_, y = y_, z = z_, w = w_;
+	};
+	void assign(const float *ptr)
+	{
+		float_dat = _mm_loadu_ps(ptr);
+	};
+	void assign(const __m128& dat)
+	{
+		_mm_store_ps(&x, dat);
 	}
 
 	float length() const

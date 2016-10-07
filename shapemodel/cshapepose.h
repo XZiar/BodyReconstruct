@@ -21,7 +21,6 @@ public:
 	CShapePose();
 
 	void getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut);
-	void getModelFastEx(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut);
 	void getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints);
 	void getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints);
 	void setEvectors(arma::mat &evectorsIn);
