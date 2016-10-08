@@ -147,7 +147,7 @@ vector<Vertex> CShapePose::getModelByPose(const vector<Vertex>& basePoints, cons
 	initMesh.angleToMatrix(mRBM, TW, M);
 
 	// rotate joints
-	initMesh.rigidMotionEx(M, TW, true, true);
+	initMesh.rigidMotionSim(M, true);
 
 	return std::move(initMesh.vPoints);
 }
@@ -192,7 +192,7 @@ vector<Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, 
 	initMesh.angleToMatrix(mRBM, TW, M);
 
 	// rotate joints
-	initMesh.rigidMotionEx(M, TW, true, true);
+	initMesh.rigidMotionSim(M, true);
 
 	return std::move(initMesh.vPoints);
 }

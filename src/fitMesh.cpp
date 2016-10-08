@@ -708,13 +708,13 @@ vector<uint32_t> fitMesh::getVertexFacesIdx(int point_idx, arma::mat &faces)
    }
    return pointFacesIdx;
 }
-int32_t fitMesh::getVertexFacesIdxEx(const int point_idx, const arma::mat& faces)
+int32_t fitMesh::getVertexFacesIdxEx(const double point_idx, const arma::mat& faces)
 {
-	const double *ptr = faces.memptr();
-	for (uint32_t i = 0; i < faces.n_elem; ++i)
+	const double *px = faces.memptr(), *py = px + faces.n_rows, *pz = py + faces.n_rows;
+	for (uint32_t i = 0; i < faces.n_rows; ++i)
 	{
-		if (ptr[i] == point_idx)
-			return (i % faces.n_rows);
+		if (px[i] == point_idx || py[i] == point_idx || pz[i] == point_idx)
+			return i;
 	}
 	return -1;
 }

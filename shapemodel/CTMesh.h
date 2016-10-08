@@ -100,7 +100,7 @@ public:
 class CMesh
 {
 public:
-	bool isShowSData = false;
+	bool isCopy = false;
 	void prepareData();
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
@@ -134,7 +134,8 @@ public:
 
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
-	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
+	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
+	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);
@@ -227,7 +228,9 @@ protected:
 		float weight;
 	};
 	std::vector<SmoothParam> ptSmooth;
+	const SmoothParam *thePtSmooth = nullptr;
 	std::vector<miniBLAS::Vertex> wgtMat;
+	const miniBLAS::Vertex *theWgtMat = nullptr;
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;

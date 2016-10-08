@@ -466,6 +466,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		using miniBLAS::Vertex;
 		uint32_t xgap = (mNumPoints + 3) / 4;
 		wgtMat.resize(xgap*mJointNumber);
+		theWgtMat = &wgtMat[0];
 		memset(&wgtMat[0], 0x0, xgap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
 		const uint32_t ept = 4 - (mNumPoints & 0x3);
@@ -636,6 +637,7 @@ void CMesh::prepareData()
 			ptSmooth[i].weight = ptr[4 + 2 * c];
 		}
 	}
+	thePtSmooth = &ptSmooth[0];
 }
 
 void CMesh::centerModel()
@@ -936,7 +938,7 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 		mCurrentMotion.mPoseParameters += X;
 	}
 }
-void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth, bool force)
+void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 {
 	using miniBLAS::Vertex;
 	Vertex(*Mvert)[3] = new Vertex[M.size()][3];
@@ -972,22 +974,26 @@ void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, 
 		{
 			__m128 res = _mm_setzero_ps();
 			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
-			for (int n = mNumSmooth; n-- ; ++iSmt)
+			for (int n = mNumSmooth; n--; ++iSmt)
 			{
-				const Vertex(&trans)[3] = Mvert[ptSmooth[iSmt].idx];
+				const Vertex(&trans)[3] = Mvert[thePtSmooth[iSmt].idx];
 				res = _mm_add_ps
 				(res, _mm_mul_ps
-					(_mm_set1_ps(ptSmooth[iSmt].weight), _mm_blend_ps
-						(
-							_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-							_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-						)/*x,y,z,0*/
-					)
+				(_mm_set1_ps(thePtSmooth[iSmt].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/
+				)
 				);
 			}
 			vPoints[i].assign(res);
 		}
 	}
+}
+void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth, const bool force)
+{
+	rigidMotionSim(M, smooth);
 
 	CVector<float> a(4); a(3) = 1.0;
 	CVector<float> b(4);
@@ -1234,13 +1240,16 @@ void CMesh::operator=(const CMesh& aMesh)
 	weightMatrix = aMesh.weightMatrix;
 
 	wgtMat = aMesh.wgtMat;
+	theWgtMat = &wgtMat[0];
 	vPoints = aMesh.vPoints;
 	ptSmooth = aMesh.ptSmooth;
+	thePtSmooth = &ptSmooth[0];
 }
 
 CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
 {
 	using miniBLAS::Vertex;
+	isCopy = true;
 	mJointNumber = from.mJointNumber;
 	mNumPoints = from.mNumPoints;
 	mNumPatch = 0;// from.mNumPatch;
@@ -1264,19 +1273,17 @@ CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
 	mAccumulatedMotion = from.mAccumulatedMotion;
 	mCurrentMotion = from.mCurrentMotion;
 
-	wgtMat.resize(from.wgtMat.size());
-	memcpy(&wgtMat[0], &from.wgtMat[0], from.wgtMat.size() * sizeof(Vertex));
-	//wgtMat = from.wgtMat;
+	//avoid overhead of copying data unecessarily
+	theWgtMat = from.theWgtMat;
+	thePtSmooth = from.thePtSmooth;
 	if (pointsIn == nullptr)
 		vPoints = from.vPoints;
 	else
 		vPoints = *pointsIn;
-	ptSmooth = from.ptSmooth;
 }
 
 void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
 {
-
 	int I[4];
 	CVector<float> aPoint(3);
 	int ax, ay, bx, by, cx, cy;
@@ -1308,7 +1315,6 @@ void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineV
 			for (j = 0; j < 3; j++)
 			{
 				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-
 
 				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
 					aImage.drawLine(ax, ay, bx, by, aLineValue);
@@ -1858,7 +1864,7 @@ void CMesh::updateJntPosEx()
 	{
 		//calc min
 		__m128 sumvec = _mm_setzero_ps(), sumtmp;
-		const Vertex *__restrict va = &wgtMat[0] + idxmap[a][0] * xgap, *__restrict vb = &wgtMat[0] + idxmap[a][1] * xgap;
+		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * xgap, *__restrict vb = theWgtMat + idxmap[a][1] * xgap;
 		for (uint32_t b = 0; b < xgap; b++)
 		{
 			sumtmp = _mm_min_ps(*va++, *vb++);
