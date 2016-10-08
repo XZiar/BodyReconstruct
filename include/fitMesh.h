@@ -66,6 +66,7 @@ public:
 	CScan scanbody;
 
 	bool isFastCost = false;
+	bool useFLANN = false;
     int angleLimit;
 	double scale;
     arColIS isVisible;

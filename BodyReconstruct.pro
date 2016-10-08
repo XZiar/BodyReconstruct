@@ -44,6 +44,7 @@ LIBS += /usr/local/lib/libboost_system.so \
 
 QMAKE_CXXFLAGS += -msse4.2
 QMAKE_CXXFLAGS += -g
+QMAKE_CXXFLAGE += -j2
 
 PKGCONFIG += pcl_io-1.8
 PKGCONFIG += opencv

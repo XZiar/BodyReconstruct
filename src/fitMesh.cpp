@@ -112,12 +112,14 @@ private:
 	const arma::mat shapeParam_;
 	const arColIS isValidNN_;
 	const unique_ptr<Vertex[], decltype(deletor)> scanCache;
+	vector<Vertex> basePts;
 	CShapePose *shapepose_;
 
 public:
 	PoseCostFunctorEx(CShapePose *shapepose, const arma::mat shapeParam, const arColIS isValidNN, const cv::Mat idxNN, const arma::mat scanPoints)
 		: shapepose_(shapepose), shapeParam_(shapeParam), isValidNN_(isValidNN), scanCache(armaTOcache(scanPoints, idxNN.ptr<uint32_t>(), idxNN.rows))
 	{
+		basePts = shapepose_->getBaseModel(shapeParam_.memptr());
 	}
 	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose/*, const double * scale*/, double* residual) const
@@ -125,7 +127,8 @@ public:
 		uint64_t t1, t2;
 		t1 = getCurTimeNS();
 
-		const auto pts = shapepose_->getModelFast(shapeParam_.memptr(), pose);
+		//const auto pts = shapepose_->getModelFast(shapeParam_.memptr(), pose);
+		const auto pts = shapepose_->getModelByPose(basePts, pose);
 		auto *__restrict pValid = isValidNN_.memptr();
 		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
 		{
@@ -925,9 +928,12 @@ void fitMesh::fitShapePose()
     double err=0;
 
 	cv::Mat pointscv = armaTOcv(scanbody.points);
-	cv::flann::KDTreeIndexParams indexParams(8);
-	scanbody.kdtree = new cv::flann::Index(pointscv, indexParams);
-	cout << "cv kd tree build, scan points number: " << pointscv.rows << endl;
+	if (false)
+	{
+		cv::flann::KDTreeIndexParams indexParams(8);
+		scanbody.kdtree = new cv::flann::Index(pointscv, indexParams);
+		cout << "cv kd tree build, scan points number: " << pointscv.rows << endl;
+	}
 
 	updatePoints(idxsNN_, isValidNN_, scale, err);
     showResult(false);
@@ -1079,12 +1085,6 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
 void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam,double &scale)
 {
 	double *shape = shapeParam.memptr();
-	/*
-    double shape[SHAPEPARAM_NUM];
-    //Initialization
-    for(int l=0;l<SHAPEPARAM_NUM;l++)
-        shape[l]=shapeParam(0,l);
-	*/
 
     Problem problem;
 	cout << "construct problem: SHAPE\n";
@@ -1101,7 +1101,6 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 			(new ShapeCostFunctor(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
-	shapepose.showShapeParam = true;
 //    ceres::CostFunction* reg_function = new ceres::AutoDiffCostFunction<ShapeRegularizer,SHAPEPARAM_NUM,SHAPEPARAM_NUM>
 //            (new ShapeRegularizer(1.0/tempbody.nPoints,SHAPEPARAM_NUM));
 //    problem.AddResidualBlock(reg_function,NULL,shape);
@@ -1120,34 +1119,21 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     cout << summary.BriefReport() << "\n";
 	const double rt = runtime; const uint32_t rc = runcnt;
 	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
-	shapepose.showShapeParam = false;
 
     cout<<"estimated shape params: ";
-    for(int i=0;i<SHAPEPARAM_NUM;i++)
+	for (int i = 0; i < SHAPEPARAM_NUM; i++)
     {
-        //shapeParam(0,i)=shape[i];
         cout<<shape[i]<<" ";
     }
 	printf("scale %f\n", scale);
 }
 
-#define USE_FLANN
 void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
-	if(false)
-	//if (yesORno("custom shape param?"))
-	{
-		int idx = inputNumber("obj pos ");
-		int val = inputNumber("obj val ");
-		tempbody.shape_params.memptr()[idx] = val;
-	}
-	arma::mat pointsSM, jointsSM;
-	//shapepose.getModel(tempbody.shape_params, tempbody.pose_params, pointsSM, jointsSM);
-	shapepose.showShapeParam = true;
+	arma::mat pointsSM;
+
 	auto pts = shapepose.getModelFast(tempbody.shape_params.memptr(), tempbody.pose_params.memptr());
-	shapepose.showShapeParam = false;
 	{
-		printf("\nconverting.\n");
 		pointsSM.resize(pts.size(), 3);
 		auto *px = pointsSM.memptr(), *py = px + pts.size(), *pz = py + pts.size();
 		for (uint32_t a = 0; a < pts.size(); ++a)
@@ -1164,9 +1150,9 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 	calculateNormals(tempbody.points_idxes, tempbody.faces, normalsSM, normals_faces);
 
 	uint64_t t1, t2;
-#ifdef USE_FLANN
 	cv::Mat idxsNNOLD(1, 1, CV_32S);
 	cv::Mat distNNOLD(1, 1, CV_32FC1);
+	if(useFLANN)
 	{
 		t1 = getCurTime();
 		cv::Mat cvPointsSM = armaTOcv(pointsSM);
@@ -1175,17 +1161,9 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 		t2 = getCurTime();
 		printf("cvFLANN uses %lld ms.\n", t2 - t1);
 	}
-#endif
+
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S);
 	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1);
-	if(false)
-	{
-		t1 = getCurTime();
-		auto tpPoints = armaTOcache(pointsSM);
-		scanbody.nntree.searchOld(tpPoints.get(), tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
-		t2 = getCurTime();
-		printf("sse4NN-OLD uses %lld ms.\n", t2 - t1);
-	}
 	{
 		t1 = getCurTime();
 
@@ -1277,7 +1255,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 			auto tp = armaTOcache(tempbody.points);
 			fwrite(tp.get(), sizeof(Vertex), cnt, fp);
 		}
-	#ifdef USE_FLANN
+		if (useFLANN)
 		{
 			type = 1;
 			fwrite(&type, sizeof(type), 1, fp);
@@ -1287,7 +1265,6 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 			fwrite(&cnt, sizeof(cnt), 1, fp);
 			fwrite(idxsNNOLD.ptr<int>(0), sizeof(int), cnt, fp);
 		}
-	#endif
 		{
 			type = 1;
 			fwrite(&type, sizeof(type), 1, fp);

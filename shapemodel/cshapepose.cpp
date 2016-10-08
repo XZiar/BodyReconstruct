@@ -8,6 +8,7 @@ using std::cout;
 using std::endl;
 using std::string;
 using std::vector;
+using miniBLAS::Vertex;
 
 using EigenVec = vector<CMatrix<double> >;
 
@@ -44,18 +45,7 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	// Read object model
 	CMesh initMesh = initMesh_bk;
 
-	if (isFastChange)
-		initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
-	else
-	{
-		// use eingevectors passed as an argument
-		EigenVec ev = CMesh::readShapeSpaceEigens(eigenVectorsIn, numEigenVectors, initMesh.GetPointSize());
-		CVector<float> shapeParamsFloat(numEigenVectors);
-		for (uint32_t i = 0; i < numEigenVectors; i++)
-			shapeParamsFloat(i) = float(shapeParamsIn[i]);
-		// reshape the model
-		initMesh.shapeChangesToMesh(shapeParamsFloat, ev);
-	}	
+	initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
 
 	// update joints
 	initMesh.updateJntPos();
@@ -112,16 +102,62 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	}
 	return 0;
 }
-
-std::vector<miniBLAS::Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
+vector<Vertex> CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 {
-	using miniBLAS::Vertex;
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const uint32_t numEigenVectors = evectors.n_rows;
+	// Read object model
+	CMesh initMesh(initMesh_bk, nullptr);
+	Vertex vShape[5];
+	{
+		float *__restrict pShape = vShape[0];
+		const float *pEV = evalue[0];
+		for (uint32_t a = 0; a < 20; ++a)
+		{
+			*pShape++ = shapeParamsIn[a] * (*pEV++);
+		}
+	}
+	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
+	return std::move(initMesh.vPoints);
+}
+vector<Vertex> CShapePose::getModelByPose(const vector<Vertex>& basePoints, const double *__restrict poseParamsIn)
+{
+	// Read object model
+	CMesh initMesh(initMesh_bk, &basePoints);
+
+	// update joints
+	initMesh.updateJntPosEx();
+
+	// read motion params from the precomputed 3D poses
+	const uint32_t numMotionParams = 31;
+	CVector<double> mParams(numMotionParams);
+	for (uint32_t i = 0; i < numMotionParams; i++)
+	{
+		mParams(i) = poseParamsIn[i];
+	}
+	CMatrix<float> mRBM(4, 4);
+	NRBM::RVT2RBM(&mParams, mRBM);
+
+	CVector<CMatrix<float> > M(initMesh.joints() + 1);
+	CVector<float> TW(initMesh.joints() + 6);
+	for (int j = 6; j < mParams.size(); ++j)
+	{
+		TW(j) = (float)mParams(j);
+	}
+	initMesh.angleToMatrix(mRBM, TW, M);
+
+	// rotate joints
+	initMesh.rigidMotionEx(M, TW, true, true);
+
+	return std::move(initMesh.vPoints);
+}
+vector<Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
+{
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	
 	// Read object model
-	CMesh initMesh(initMesh_bk, true);
-	//CMesh initMesh = initMesh_bk;
+	CMesh initMesh(initMesh_bk, nullptr);
 
 	Vertex vShape[5];
 	{
@@ -170,11 +206,6 @@ void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsI
 	double shapePara[20];
 	for (uint32_t a = 0; a < 20; ++a)
 		shapePara[a] = shapeParamsIn[a] * pEV[a];
-	if (showShapeParam)
-	{
-		for (uint32_t a = 0; a < 20; ++a)
-			printf("%e,", shapePara[0]);
-	}
 
 	//For return data
 	points.zeros(6449, 3);
@@ -186,28 +217,13 @@ void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsI
 
 void CShapePose::getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints)
 {
-	const double *motionParamsIn = poseParam.memptr();/* 31x1*/
+	const double *poseParamsIn = poseParam.memptr();/* 31x1*/
 	const double *shapeParamsIn = shapeParam.memptr();/* 20x1*/
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
-	//
-	//  cout<<"in shape pose====================="<<endl;
-	//  cout<<poseParam<<endl;
-	//  cout<<evectors.n_rows<<","<<evectors.n_cols<<endl;
-	//  cout<<shapeParam<<endl;
-	//  cin.ignore();
-
-	//For return data
-	points.zeros(6449, 3);
-	double *pointsOut = points.memptr();/* 6449x3*/
-	joints.zeros(25, 8);
-	double *jointsOut = joints.memptr();/* 24x8: jid directions_XYZ positions_XYZ jparent_id*/
-	getpose(motionParamsIn, shapeParamsIn, eigenVectorsIn, numEigenVectors, pointsOut, jointsOut);
+	getModel(shapeParamsIn, poseParamsIn, points, joints);
 }
 
 void CShapePose::setEvectors(arma::mat &evectorsIn)
 {
-	using miniBLAS::Vertex;
 	evectors = evectorsIn;
 
 	const uint32_t numEigenVectors = evectorsIn.n_rows;

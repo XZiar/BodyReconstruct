@@ -1238,15 +1238,14 @@ void CMesh::operator=(const CMesh& aMesh)
 	ptSmooth = aMesh.ptSmooth;
 }
 
-CMesh::CMesh(const CMesh& from, const bool isFast)
+CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
 {
+	using miniBLAS::Vertex;
 	mJointNumber = from.mJointNumber;
 	mNumPoints = from.mNumPoints;
 	mNumPatch = 0;// from.mNumPatch;
 	mNumSmooth = from.mNumSmooth;
 
-	//semms unnecessary, remove for speed
-	//mPatch = from.mPatch;
 	mNoOfBodyParts = from.mNoOfBodyParts;
 	mBoundJoints = from.mBoundJoints;
 
@@ -1265,8 +1264,13 @@ CMesh::CMesh(const CMesh& from, const bool isFast)
 	mAccumulatedMotion = from.mAccumulatedMotion;
 	mCurrentMotion = from.mCurrentMotion;
 
-	wgtMat = from.wgtMat;
-	vPoints = from.vPoints;
+	wgtMat.resize(from.wgtMat.size());
+	memcpy(&wgtMat[0], &from.wgtMat[0], from.wgtMat.size() * sizeof(Vertex));
+	//wgtMat = from.wgtMat;
+	if (pointsIn == nullptr)
+		vPoints = from.vPoints;
+	else
+		vPoints = *pointsIn;
 	ptSmooth = from.ptSmooth;
 }
 

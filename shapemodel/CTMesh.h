@@ -114,7 +114,7 @@ public:
 	// constructor
 	inline CMesh();
 	inline CMesh(const CMesh& aMesh);
-	CMesh(const CMesh& from, const bool isFast);
+	CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn);
 	CMesh(int aPoints, int aPatches);
 	// destructor
 	~CMesh();
