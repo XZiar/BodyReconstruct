@@ -100,18 +100,20 @@ public:
 class CMesh
 {
 public:
+	void prepareData();
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
-	std::vector<miniBLAS::Vertex> fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
+	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
 	int updateJntPos();
-	void updateJntPosEx(const std::vector<miniBLAS::Vertex>& ptCache);
+	void updateJntPosEx();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints);
 	// constructor
 	inline CMesh();
 	inline CMesh(const CMesh& aMesh);
+	CMesh(const CMesh& from, const bool isFast);
 	CMesh(int aPoints, int aPatches);
 	// destructor
 	~CMesh();
@@ -216,9 +218,15 @@ public:
 	// Gives access to pose history
 	//inline CVector<CMeshMotion>& history() {return mHistory;};
 
+	std::vector<miniBLAS::Vertex> vPoints;
 protected:
-
-	int mJointNumber;
+	struct SmoothParam
+	{
+		uint32_t idx;
+		float weight;
+	};
+	std::vector<SmoothParam> ptSmooth;
+	std::vector<miniBLAS::Vertex> wgtMat;
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;
@@ -231,6 +239,7 @@ protected:
 	CVector<bool> mCovered;
 	CVector<bool> mExtremity;
 
+	int mJointNumber;
 	int mNumPoints;
 	int mNumPatch;
 	int mNumSmooth; // how many joints can influence any given point
@@ -248,7 +257,6 @@ protected:
 	CVector<CJoint>  mJoint;
 	//static std::vector<CMatrix<double> >  eigenVectors;
 	CMatrix<float> weightMatrix;
-	miniBLAS::Vertex *wgtMat = nullptr;
 
 	// Sure Fields before the Draping ...
 	// CVector<float>* mPointsS;

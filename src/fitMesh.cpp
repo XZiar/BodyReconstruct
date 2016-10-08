@@ -125,14 +125,14 @@ public:
 		uint64_t t1, t2;
 		t1 = getCurTime();
 
-		Vertex pointsSM[6449];
-		shapepose_->getModelFast(shapeParam_.memptr(), pose, pointsSM[0]);
+		//Vertex pointsSM[6449];
+		const auto pts = shapepose_->getModelFast(shapeParam_.memptr(), pose);
 		auto *__restrict pValid = isValidNN_.memptr();
 		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
 		{
 			if (pValid[j])
 			{
-				const Vertex delta = scanCache[j] - pointsSM[j];
+				const Vertex delta = scanCache[j] - pts[j];
 				residual[i++] = delta.x;
 				residual[i++] = delta.y;
 				residual[i++] = delta.z;

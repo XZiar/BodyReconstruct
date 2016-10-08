@@ -17,6 +17,7 @@ CShapePose::CShapePose()
 	initMesh_bk.readModel(aModelFile, SMOOTHMODEL);
 	initMesh_bk.updateJntPos();
 	initMesh_bk.centerModel();
+	initMesh_bk.prepareData();
 }
 
 int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
@@ -112,24 +113,26 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	return 0;
 }
 
-void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, float *__restrict pointsOut)
+std::vector<miniBLAS::Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
 {
+	using miniBLAS::Vertex;
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	
 	// Read object model
-	CMesh initMesh = initMesh_bk;
-	//initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
-	miniBLAS::Vertex vShape[5];
+	CMesh initMesh(initMesh_bk, true);
+	//CMesh initMesh = initMesh_bk;
+
+	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
 		for (uint32_t a = 0; a < 20; ++a)
 			*pShape++ = shapeParamsIn[a];
 	}
-	const auto ptCache = initMesh.fastShapeChangesToMesh(vShape, evecCache);
+	initMesh.fastShapeChangesToMesh(vShape, evecCache);
 
 	// update joints
-	initMesh.updateJntPosEx(ptCache);
+	initMesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	const uint32_t numMotionParams = 31;
@@ -152,12 +155,7 @@ void CShapePose::getModelFast(const double *__restrict shapeParamsIn, const doub
 	// rotate joints
 	initMesh.rigidMotionEx(M, TW, true, true);
 
-	// Fill in resulting points array
-	const int nPoints = initMesh.GetPointSize();
-	for (int i = 0; i < nPoints; pointsOut += 4)
-	{
-		initMesh.GetPoint3(i++, pointsOut);
-	}
+	return std::move(initMesh.vPoints);
 }
 
 void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)

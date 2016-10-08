@@ -154,8 +154,6 @@ CMesh::CMesh(int aPatches, int aPoints)
 // destructor
 CMesh::~CMesh()
 {
-	if (wgtMat != nullptr)
-		delete[] wgtMat;
 	//cout << "DEL-CMESH...";
 	//if(mPointsS !=0) delete[] mPointsS;
 	//if(mPoints !=0) delete[] mPoints;
@@ -467,8 +465,8 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	{
 		using miniBLAS::Vertex;
 		uint32_t xgap = (mNumPoints + 3) / 4;
-		wgtMat = new Vertex[xgap*mJointNumber];
-		memset(wgtMat, 0x0, xgap*mJointNumber * sizeof(Vertex));
+		wgtMat.resize(xgap*mJointNumber);
+		memset(&wgtMat[0], 0x0, xgap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
 		const uint32_t ept = 4 - (mNumPoints & 0x3);
 		for (uint32_t a = 0; a < mJointNumber; ++a)
@@ -620,6 +618,24 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	cout << "ok" << endl;
 #endif
 	return true;
+}
+
+void CMesh::prepareData()
+{
+	//prepare vPoints
+	using miniBLAS::Vertex;
+	vPoints.resize(mNumPoints);
+	ptSmooth.resize(mNumPoints * mNumSmooth);
+	for (uint32_t a = 0, i = 0; a < mNumPoints; ++a)
+	{
+		const float *ptr = mPoints[a].data();
+		vPoints[a].assign(ptr);
+		for (uint32_t c = 0; c < mNumSmooth; i++, c++)
+		{
+			ptSmooth[i].idx = (uint32_t)ptr[3 + 2 * c];
+			ptSmooth[i].weight = ptr[4 + 2 * c];
+		}
+	}
 }
 
 void CMesh::centerModel()
@@ -938,33 +954,31 @@ void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, 
 	{
 		for (int i = 0; i < mNumPoints; i++)
 		{
-			float *__restrict pSrc = mPoints[i].data();
-			const __m128 src = _mm_loadu_ps(pSrc);
-			const Vertex(&trans)[3] = Mvert[int(pSrc[3])];
-			const __m128 dat = _mm_blend_ps(src, mask, 0b1000);
+			//float *__restrict pSrc = mPoints[i].data();
+			const Vertex(&trans)[3] = Mvert[int(vPoints[i].w)];
+			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
 			const __m128 res = _mm_blend_ps
 			(
 				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-				_mm_movehl_ps(src/*x',y',z',w*/, _mm_dp_ps(dat, trans[1], 0b11111000)/*0,0,0,y*/)/*0,y,z',w*/,
+				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/,
 				0b1010
-			);/*x,y,z,w*/
-			_mm_storeu_ps(pSrc, res);
+			);/*x,y,z,0*/
+			_mm_store_ps(vPoints[i], res);
 		}
 	}
 	else
 	{
-		for (int i = 0; i < mNumPoints; i++)
+		for (int i = 0, iSmt = 0; i < mNumPoints; i++)
 		{
 			float *__restrict pSrc = mPoints[i].data();
 			__m128 res = _mm_setzero_ps();
-			const __m128 src = _mm_loadu_ps(pSrc), dat = _mm_blend_ps(src, mask, 0b1000);
-			uint32_t idxT = 3, idxC = 4;
-			for (int n = 0; n < mNumSmooth; n++, idxT+=2, idxC+=2)
+			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
+			for (int n = mNumSmooth; n-- ; ++iSmt)
 			{
-				const Vertex(&trans)[3] = Mvert[int(pSrc[idxT])];
+				const Vertex(&trans)[3] = Mvert[ptSmooth[iSmt].idx];
 				res = _mm_add_ps
 				(res, _mm_mul_ps
-					(_mm_set1_ps(pSrc[idxC]), _mm_blend_ps
+					(_mm_set1_ps(ptSmooth[iSmt].weight), _mm_blend_ps
 						(
 							_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
 							_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
@@ -972,7 +986,7 @@ void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, 
 					)
 				);
 			}
-			_mm_storeu_ps(pSrc, _mm_blend_ps(res, src, 0b1000)/*x,y,z,w*/);
+			vPoints[i].assign(res);
 		}
 	}
 
@@ -1192,7 +1206,6 @@ bool CMesh::isParentOf(int aParentJointID, int aJointID)
 // operator=
 void CMesh::operator=(const CMesh& aMesh)
 {
-
 	mJointNumber = aMesh.mJointNumber;
 	mNumPoints = aMesh.mNumPoints;
 	mNumPatch = aMesh.mNumPatch;
@@ -1203,7 +1216,6 @@ void CMesh::operator=(const CMesh& aMesh)
 
 	mNoOfBodyParts = aMesh.mNoOfBodyParts;
 	mBoundJoints = aMesh.mBoundJoints;
-
 
 	mBounds = aMesh.mBounds;
 	mCenter = aMesh.mCenter;
@@ -1221,19 +1233,42 @@ void CMesh::operator=(const CMesh& aMesh)
 	mCurrentMotion = aMesh.mCurrentMotion;
 
 	weightMatrix = aMesh.weightMatrix;
-	{
-		using miniBLAS::Vertex;
-		if (wgtMat != nullptr)
-			delete[] wgtMat;
-		if (aMesh.wgtMat != nullptr)
-		{
-			uint32_t xgap = (aMesh.mNumPoints + 3) / 4;
-			wgtMat = new Vertex[xgap*aMesh.mJointNumber];
-			memcpy(wgtMat, aMesh.wgtMat, xgap*aMesh.mJointNumber * sizeof(Vertex));
-		}
-		else
-			wgtMat = nullptr;
-	}
+
+	wgtMat = aMesh.wgtMat;
+	vPoints = aMesh.vPoints;
+	ptSmooth = aMesh.ptSmooth;
+}
+
+CMesh::CMesh(const CMesh& from, const bool isFast)
+{
+	mJointNumber = from.mJointNumber;
+	mNumPoints = from.mNumPoints;
+	mNumPatch = 0;// from.mNumPatch;
+	mNumSmooth = from.mNumSmooth;
+
+	//semms unnecessary, remove for speed
+	//mPatch = from.mPatch;
+	mNoOfBodyParts = from.mNoOfBodyParts;
+	mBoundJoints = from.mBoundJoints;
+
+	mBounds = from.mBounds;
+	mCenter = from.mCenter;
+	mJointMap = from.mJointMap;
+	mNeighbor = from.mNeighbor;
+	mEndJoint = from.mEndJoint;
+
+	mCovered = from.mCovered;
+	mExtremity = from.mExtremity;
+
+	mJoint = from.mJoint;
+	mInfluencedBy = from.mInfluencedBy;
+
+	mAccumulatedMotion = from.mAccumulatedMotion;
+	mCurrentMotion = from.mCurrentMotion;
+
+	wgtMat = from.wgtMat;
+	vPoints = from.vPoints;
+	ptSmooth = from.ptSmooth;
 }
 
 void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
@@ -1574,26 +1609,24 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-vector<miniBLAS::Vertex> CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
 {
 	using miniBLAS::Vertex;
 	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	vector<Vertex> tmpPoints(mNumPoints);
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
 	const auto nPoints = mPoints.size();
 	const Vertex *__restrict pEvec = eigenVectorsIn;
 	for (uint32_t row = 0; row < nPoints; row++)
 	{
-		float *__restrict pPvec = mPoints[row].data();
-		_mm_prefetch(pPvec + 15, _MM_HINT_NTA);
-		_mm_prefetch(pPvec + 19, _MM_HINT_NTA);
-		_mm_prefetch(pPvec + 23, _MM_HINT_NTA);
-		_mm_prefetch(pPvec + 27, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 23, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
 		const __m128 add01 = _mm_add_ps
 		(
-			_mm_loadu_ps(pPvec)/*x,y,z,?*/,
+			_mm_loadu_ps(vPoints[row])/*x,y,z,?*/,
 			_mm_blend_ps(_mm_dp_ps(sp1, pEvec[0], 0b11110001)/*sx1,0,0,0*/, _mm_dp_ps(sp1, pEvec[5], 0b11110010)/*0,sy1,0,0*/, 0b10)/*sx1,sy1,0,0*/
 		);
 		const __m128 add23 = _mm_add_ps
@@ -1612,15 +1645,12 @@ vector<miniBLAS::Vertex> CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *s
 			_mm_add_ps(_mm_dp_ps(sp3, pEvec[12], 0b11110100)/*0,0,sz3,0*/, _mm_dp_ps(sp4, pEvec[13], 0b11110100)/*0,0,sz4,0*/)
 		);
 		pEvec += 15;
-		tmpPoints[row].assign(_mm_add_ps
+		vPoints[row].assign(_mm_add_ps
 		(
 			_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/,
 			_mm_add_ps(_mm_add_ps(add01, add23), _mm_add_ps(add45, addz))
 		));
-		const Vertex& res = tmpPoints[row];
-		pPvec[0] = res.x, pPvec[1] = res.y, pPvec[2] = res.z;
 	}
-	return tmpPoints;
 }
 
 int CMesh::updateJntPos()
@@ -1805,7 +1835,7 @@ static void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
 	sumVec(ptr, a, step + 1);
 }
 
-void CMesh::updateJntPosEx(const std::vector<miniBLAS::Vertex>& ptCache)
+void CMesh::updateJntPosEx()
 {
 	using miniBLAS::Vertex;
 	static const uint8_t idxmap[][3] = //i0,i1,i1*3
@@ -1821,7 +1851,7 @@ void CMesh::updateJntPosEx(const std::vector<miniBLAS::Vertex>& ptCache)
 	{
 		//calc min
 		__m128 sumvec = _mm_setzero_ps(), sumtmp;
-		const Vertex *__restrict va = wgtMat + idxmap[a][0] * xgap, *__restrict vb = wgtMat + idxmap[a][1] * xgap;
+		const Vertex *__restrict va = &wgtMat[0] + idxmap[a][0] * xgap, *__restrict vb = &wgtMat[0] + idxmap[a][1] * xgap;
 		for (uint32_t b = 0; b < xgap; b++)
 		{
 			sumtmp = _mm_min_ps(*va++, *vb++);
@@ -1835,7 +1865,7 @@ void CMesh::updateJntPosEx(const std::vector<miniBLAS::Vertex>& ptCache)
 			__m128 sum = _mm_setzero_ps();
 			{// componet_wise_mul_with_pnts and sum it
 				const float *pFMin = wgtMin[0];
-				const Vertex *__restrict pOri = &ptCache[0];
+				const Vertex *__restrict pOri = &vPoints[0];
 				for (uint32_t b = mNumPoints / 3; b--; pFMin += 3, pOri += 3)
 					sum = _mm_add_ps
 					(
