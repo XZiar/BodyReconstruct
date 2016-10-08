@@ -73,7 +73,7 @@ public:
 	bool operator()(const double* pose/*, const double * scale*/, double* residual) const
 	{
 		uint64_t t1, t2;
-		t1 = getCurTime();
+		t1 = getCurTimeNS();
 
 		arma::mat pointsSM, jointsSM;
 		shapepose_->getModel(shapeParam_.memptr(), pose, pointsSM, jointsSM);
@@ -99,8 +99,8 @@ public:
 		}
 		
 		runcnt++;
-		t2 = getCurTime();
-		runtime += (uint32_t)(t2 - t1);
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
 		return true;
 	}
 };
@@ -123,9 +123,8 @@ public:
 	bool operator()(const double* pose/*, const double * scale*/, double* residual) const
 	{
 		uint64_t t1, t2;
-		t1 = getCurTime();
+		t1 = getCurTimeNS();
 
-		//Vertex pointsSM[6449];
 		const auto pts = shapepose_->getModelFast(shapeParam_.memptr(), pose);
 		auto *__restrict pValid = isValidNN_.memptr();
 		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
@@ -145,10 +144,58 @@ public:
 			}
 		}
 
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
+
+struct ShapeCostFunctorEx
+{
+private:
+	// Observations for a sample.
+	const arma::mat poseParam_;
+	const arColIS isValidNN_;
+	const cv::Mat idxNN_;
+	const unique_ptr<Vertex[], decltype(deletor)> scanCache;
+	CShapePose *shapepose_;
+	double scale_;
+
+public:
+	ShapeCostFunctorEx(CShapePose *shapepose, const arma::mat poseParam, const arColIS isValidNN, const cv::Mat idxNN, const arma::mat scanPoints,
+		const double scale) : shapepose_(shapepose), poseParam_(poseParam), isValidNN_(isValidNN), idxNN_(idxNN),
+		scanCache(armaTOcache(scanPoints, idxNN.ptr<uint32_t>(), idxNN.rows)), scale_(scale)
+	{
+	}
+	//w is the parameters to be estimated, b is the bias, residual is to return
+	bool operator() (const double* shape, double* residual) const
+	{
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		const auto pts = shapepose_->getModelFast(shape, poseParam_.memptr());
+		auto *__restrict pValid = isValidNN_.memptr();
+		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
+		{
+			if (pValid[j])
+			{
+				const Vertex delta = (scanCache[j] - pts[j]) * scale_;
+				residual[i++] = delta.x;
+				residual[i++] = delta.y;
+				residual[i++] = delta.z;
+			}
+			else
+			{
+				residual[i++] = 0;
+				residual[i++] = 0;
+				residual[i++] = 0;
+			}
+		}
 
 		runcnt++;
-		t2 = getCurTime();
-		runtime += (uint32_t)(t2 - t1);
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
 		return true;
 	}
 };
@@ -173,10 +220,9 @@ public:
 	bool operator() (const double* shape,/* const double* scale,*/ double* residual) const
 	{
 		uint64_t t1, t2;
-		t1 = getCurTime();
+		t1 = getCurTimeNS();
 
 		arma::mat pointsSM, jointsSM;
-
 		shapepose_->getModel(shape, poseParam_.memptr(), pointsSM, jointsSM);
 		pointsSM *= scale_;
 		// double s = 0.0;
@@ -198,8 +244,8 @@ public:
 		}
 		
 		runcnt++;
-		t2 = getCurTime();
-		runtime += (uint32_t)(t2 - t1);
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
 		return true;
 	}
 };
@@ -567,7 +613,8 @@ void fitMesh::loadModel()
     evalues = evalues.cols(0,params.nPCA-1);
     cout<<"eigen values loaded, size is: "<<evalues.n_rows<<","<<evalues.n_cols<<endl;
     shapepose.setEvectors(evectors);
-
+	shapepose.setEvalues(evalues);
+	//printMatAll("evalues", evalues);
 }
 arma::mat fitMesh::test()
 {
@@ -595,11 +642,18 @@ void fitMesh::calculateNormals(const vector<uint32_t> &points_idxes, arma::mat &
 	uint32_t idx = 0;
     normals.each_row([&](arma::rowvec& row)
     {
+		const auto ret = fitMesh::getVertexFacesIdxEx(points_idxes[idx++], faces);
+		if (ret >= 0)
+			row = normals_faces.row(ret);
+		else
+			;//row.zeros(1,3);//row = normal_tmp.zeros(1,3);
+		/*
         const auto& facesPointIdx = getVertexFacesIdx(points_idxes[idx++], faces);
         if (facesPointIdx.empty())
             ;//row = normal_tmp.zeros(1,3);
         else
             row = normals_faces.row(facesPointIdx[0]);
+		*/
     });
 }
 
@@ -646,6 +700,16 @@ vector<uint32_t> fitMesh::getVertexFacesIdx(int point_idx, arma::mat &faces)
        }
    }
    return pointFacesIdx;
+}
+int32_t fitMesh::getVertexFacesIdxEx(const int point_idx, const arma::mat& faces)
+{
+	const double *ptr = faces.memptr();
+	for (uint32_t i = 0; i < faces.n_elem; ++i)
+	{
+		if (ptr[i] == point_idx)
+			return (i % faces.n_rows);
+	}
+	return -1;
 }
 
 arma::vec searchShoulder(arma::mat model, const unsigned int lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
@@ -974,14 +1038,18 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
     cout<<"construct problem: pose\n";
 	Problem problem;
 
-	auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctorEx, ceres::CENTRAL, 6449 * 3, POSPARAM_NUM>
-		(new PoseCostFunctorEx(&shapepose, shapeParam, isValidNN, idxNN, scanbody.points));
-	auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, 6449 * 3, POSPARAM_NUM>
-		(new PoseCostFunctor(&shapepose, shapeParam, isValidNN, idxNN, scanbody.points));
-	if(isFastCost)
+	if (isFastCost)
+	{
+		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctorEx, ceres::CENTRAL, 6449 * 3, POSPARAM_NUM>
+			(new PoseCostFunctorEx(&shapepose, shapeParam, isValidNN, idxNN, scanbody.points));
 		problem.AddResidualBlock(cost_functionEx, NULL, pose);
+	}
 	else
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, 6449 * 3, POSPARAM_NUM>
+			(new PoseCostFunctor(&shapepose, shapeParam, isValidNN, idxNN, scanbody.points));
 		problem.AddResidualBlock(cost_function, NULL, pose);
+	}
 
 	auto *reg_function = new ceres::AutoDiffCostFunction<PoseRegularizer, POSPARAM_NUM, POSPARAM_NUM>
 		(new PoseRegularizer(1.0 / tempbody.nPoints, POSPARAM_NUM));
@@ -1001,7 +1069,7 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
 
     cout << summary.BriefReport() << "\n";
 	const double rt = runtime; const uint32_t rc = runcnt;
-	printf("poseCost invoked %d times, avg %f ms\n", rc, rt / rc);
+	printf("poseCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
 }
 
 void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam,double &scale)
@@ -1017,10 +1085,18 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     Problem problem;
 	cout << "construct problem: SHAPE\n";
 
-	auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, 6449 * 3, SHAPEPARAM_NUM>
-		(new ShapeCostFunctor(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
-	problem.AddResidualBlock(cost_function, NULL, shape);
-
+	if (isFastCost)
+	{
+		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx, ceres::CENTRAL, 6449 * 3, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorEx(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
+		problem.AddResidualBlock(cost_functionEx, NULL, shape);
+	}
+	else
+	{
+		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, 6449 * 3, SHAPEPARAM_NUM>
+			(new ShapeCostFunctor(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
 //    ceres::CostFunction* reg_function = new ceres::AutoDiffCostFunction<ShapeRegularizer,SHAPEPARAM_NUM,SHAPEPARAM_NUM>
 //            (new ShapeRegularizer(1.0/tempbody.nPoints,SHAPEPARAM_NUM));
 //    problem.AddResidualBlock(reg_function,NULL,shape);
@@ -1038,7 +1114,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     ceres::Solve(options, &problem, &summary);
     cout << summary.BriefReport() << "\n";
 	const double rt = runtime; const uint32_t rc = runcnt;
-	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / rc);
+	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
 
     cout<<"estimated shape params: ";
     for(int i=0;i<SHAPEPARAM_NUM;i++)

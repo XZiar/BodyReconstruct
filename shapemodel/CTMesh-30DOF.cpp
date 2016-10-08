@@ -970,7 +970,6 @@ void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, 
 	{
 		for (int i = 0, iSmt = 0; i < mNumPoints; i++)
 		{
-			float *__restrict pSrc = mPoints[i].data();
 			__m128 res = _mm_setzero_ps();
 			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
 			for (int n = mNumSmooth; n-- ; ++iSmt)

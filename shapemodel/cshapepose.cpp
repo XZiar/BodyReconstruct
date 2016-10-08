@@ -126,10 +126,11 @@ std::vector<miniBLAS::Vertex> CShapePose::getModelFast(const double *__restrict 
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
+		const float *pEV = evalue[0];
 		for (uint32_t a = 0; a < 20; ++a)
-			*pShape++ = shapeParamsIn[a];
+			*pShape++ = shapeParamsIn[a] * (*pEV++);
 	}
-	initMesh.fastShapeChangesToMesh(vShape, evecCache);
+	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
 
 	// update joints
 	initMesh.updateJntPosEx();
@@ -202,10 +203,7 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 {
 	using miniBLAS::Vertex;
 	evectors = evectorsIn;
-	if (evecCache != nullptr)
-	{
-		delete[] evecCache;
-	}
+
 	const uint32_t numEigenVectors = evectorsIn.n_rows;
 	if (numEigenVectors != 20)
 	{
@@ -213,7 +211,7 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 		getchar();
 		exit(-1);
 	}
-	evecCache = new Vertex[evectorsIn.n_elem / 4];
+	evecCache.resize(evectorsIn.n_elem / 4);
 	float *pVert = evecCache[0];
 	//20 * x(rows*3)
 	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
@@ -227,5 +225,24 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 		for (uint32_t b = 0; b < 20; ++b)
 			*pVert++ = *pz++;
 	}
+}
 
+void CShapePose::setEvalues(const arma::mat & inEV)
+{
+	const uint32_t num = inEV.n_elem;
+	if (num != 20)
+	{
+		printf("evelues should be 20 for optimization.\n\n");
+		getchar();
+		exit(-1);
+	}
+	const auto *pIn = inEV.memptr();
+	float *pOut = evalue[0];
+	for (uint32_t a = num; a--;)
+		*pOut++ = *pIn++;
+	evalue[0].do_sqrt();
+	evalue[1].do_sqrt();
+	evalue[2].do_sqrt();
+	evalue[3].do_sqrt();
+	evalue[4].do_sqrt();
 }
