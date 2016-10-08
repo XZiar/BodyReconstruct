@@ -100,6 +100,7 @@ public:
 class CMesh
 {
 public:
+	bool isShowSData = false;
 	void prepareData();
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);

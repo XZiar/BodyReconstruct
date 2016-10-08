@@ -128,7 +128,9 @@ std::vector<miniBLAS::Vertex> CShapePose::getModelFast(const double *__restrict 
 		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
 		for (uint32_t a = 0; a < 20; ++a)
+		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
+		}
 	}
 	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
 
@@ -163,19 +165,23 @@ void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsI
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
-	//
-	//  cout<<"in shape pose====================="<<endl;
-	//  cout<<poseParam<<endl;
-	//  cout<<evectors.n_rows<<","<<evectors.n_cols<<endl;
-	//  cout<<shapeParam<<endl;
-	//  cin.ignore();
+
+	const float *pEV = evalue[0];
+	double shapePara[20];
+	for (uint32_t a = 0; a < 20; ++a)
+		shapePara[a] = shapeParamsIn[a] * pEV[a];
+	if (showShapeParam)
+	{
+		for (uint32_t a = 0; a < 20; ++a)
+			printf("%e,", shapePara[0]);
+	}
 
 	//For return data
 	points.zeros(6449, 3);
 	double *pointsOut = points.memptr();/* 6449x3*/
 	joints.zeros(25, 8);
 	double *jointsOut = joints.memptr();/* 24x8: jid directions_XYZ positions_XYZ jparent_id*/
-	getpose(poseParamsIn, shapeParamsIn, eigenVectorsIn, numEigenVectors, pointsOut, jointsOut);
+	getpose(poseParamsIn, shapePara, eigenVectorsIn, numEigenVectors, pointsOut, jointsOut);
 }
 
 void CShapePose::getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints)
@@ -240,6 +246,7 @@ void CShapePose::setEvalues(const arma::mat & inEV)
 	float *pOut = evalue[0];
 	for (uint32_t a = num; a--;)
 		*pOut++ = *pIn++;
+	
 	evalue[0].do_sqrt();
 	evalue[1].do_sqrt();
 	evalue[2].do_sqrt();

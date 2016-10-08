@@ -176,6 +176,7 @@ public:
 
 		const auto pts = shapepose_->getModelFast(shape, poseParam_.memptr());
 		auto *__restrict pValid = isValidNN_.memptr();
+		//float sumerr = 0;
 		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
 		{
 			if (pValid[j])
@@ -184,6 +185,7 @@ public:
 				residual[i++] = delta.x;
 				residual[i++] = delta.y;
 				residual[i++] = delta.z;
+				//sumerr += delta.length_sqr();
 			}
 			else
 			{
@@ -192,7 +194,7 @@ public:
 				residual[i++] = 0;
 			}
 		}
-
+		//printf("\nsumerr:%f\n\n", sumerr);
 		runcnt++;
 		t2 = getCurTimeNS();
 		runtime += (uint32_t)((t2 - t1) / 1000);
@@ -226,6 +228,7 @@ public:
 		shapepose_->getModel(shape, poseParam_.memptr(), pointsSM, jointsSM);
 		pointsSM *= scale_;
 		// double s = 0.0;
+		//float sumerr = 0;
 		for (int j = 0, i = 0; j<idxNN_.rows; j++)
 		{
 			if (isValidNN_(j))
@@ -234,6 +237,7 @@ public:
 				residual[i++] = delta(0);
 				residual[i++] = delta(1);
 				residual[i++] = delta(2);
+				//sumerr += delta(0) + delta(1) + delta(2);
 			}
 			else
 			{
@@ -242,7 +246,7 @@ public:
 				residual[i++] = 0;
 			}
 		}
-		
+		//printf("\nsumerr:%f\n\n", sumerr);
 		runcnt++;
 		t2 = getCurTimeNS();
 		runtime += (uint32_t)((t2 - t1) / 1000);
@@ -1097,6 +1101,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 			(new ShapeCostFunctor(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
+	shapepose.showShapeParam = true;
 //    ceres::CostFunction* reg_function = new ceres::AutoDiffCostFunction<ShapeRegularizer,SHAPEPARAM_NUM,SHAPEPARAM_NUM>
 //            (new ShapeRegularizer(1.0/tempbody.nPoints,SHAPEPARAM_NUM));
 //    problem.AddResidualBlock(reg_function,NULL,shape);
@@ -1115,6 +1120,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     cout << summary.BriefReport() << "\n";
 	const double rt = runtime; const uint32_t rc = runcnt;
 	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
+	shapepose.showShapeParam = false;
 
     cout<<"estimated shape params: ";
     for(int i=0;i<SHAPEPARAM_NUM;i++)
@@ -1128,8 +1134,29 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 #define USE_FLANN
 void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
+	if(false)
+	//if (yesORno("custom shape param?"))
+	{
+		int idx = inputNumber("obj pos ");
+		int val = inputNumber("obj val ");
+		tempbody.shape_params.memptr()[idx] = val;
+	}
 	arma::mat pointsSM, jointsSM;
-	shapepose.getModel(tempbody.shape_params, tempbody.pose_params, pointsSM, jointsSM);
+	//shapepose.getModel(tempbody.shape_params, tempbody.pose_params, pointsSM, jointsSM);
+	shapepose.showShapeParam = true;
+	auto pts = shapepose.getModelFast(tempbody.shape_params.memptr(), tempbody.pose_params.memptr());
+	shapepose.showShapeParam = false;
+	{
+		printf("\nconverting.\n");
+		pointsSM.resize(pts.size(), 3);
+		auto *px = pointsSM.memptr(), *py = px + pts.size(), *pz = py + pts.size();
+		for (uint32_t a = 0; a < pts.size(); ++a)
+		{
+			*px++ = pts[a].x;
+			*py++ = pts[a].y;
+			*pz++ = pts[a].z;
+		}
+	}
 	pointsSM = pointsSM * scale;
 	tempbody.points = pointsSM;
 	arma::mat normalsSM, normals_faces;

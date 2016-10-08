@@ -19,6 +19,7 @@ private:
 
 public:
 	bool isFastChange = true;
+	bool showShapeParam = false;
 	CShapePose();
 
 	std::vector<miniBLAS::Vertex> getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn);

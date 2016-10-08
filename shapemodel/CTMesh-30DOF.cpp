@@ -1608,6 +1608,12 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
+static void showfloat4(const char *name, const __m128 *data)
+{
+	float* ptr = (float*)data;
+	printf("%s = %f,%f,%f,%f\n", name, ptr[0], ptr[1], ptr[2], ptr[3]);
+}
+
 void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
 {
 	using miniBLAS::Vertex;
@@ -1615,9 +1621,8 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const auto nPoints = mPoints.size();
 	const Vertex *__restrict pEvec = eigenVectorsIn;
-	for (uint32_t row = 0; row < nPoints; row++)
+	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 15)
 	{
 		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
 		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
@@ -1643,7 +1648,6 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 			_mm_add_ps(_mm_dp_ps(sp1, pEvec[10], 0b11110100)/*0,0,sz1,0*/, _mm_dp_ps(sp2, pEvec[11], 0b11110100)/*0,0,sz2,0*/),
 			_mm_add_ps(_mm_dp_ps(sp3, pEvec[12], 0b11110100)/*0,0,sz3,0*/, _mm_dp_ps(sp4, pEvec[13], 0b11110100)/*0,0,sz4,0*/)
 		);
-		pEvec += 15;
 		vPoints[row].assign(_mm_add_ps
 		(
 			_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/,
