@@ -62,7 +62,7 @@ class fitMesh
 public:
 	static CTemplate tempbody;
 	static CShapePose shapepose;
-
+	std::vector<uint32_t> tpFaceMap;
 	CScan scanbody;
 
 	bool isFastCost = false;
@@ -86,7 +86,6 @@ private:
 	void calculateNormals(const std::vector<uint32_t> &points, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces);
 	void calculateNormalsFaces(arma::mat &points, arma::mat &faces, arma::mat &normals_faces);
 	std::vector<uint32_t> getVertexFacesIdx(int point_idx, arma::mat &faces);
-	static int32_t getVertexFacesIdxEx(const double point_idx, const arma::mat& faces);
 	void rigidAlignTemplate2ScanPCA();
 	arma::mat rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth);
 	void rigidAlignTemplate2ScanLandmarks();

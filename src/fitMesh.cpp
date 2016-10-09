@@ -572,6 +572,7 @@ void fitMesh::loadTemplate()
     faces.load(dataDir+"faces.mat");
     cout<<"Template faces loaded: "<<faces.n_rows<<","<<faces.n_cols<<endl;
     tempbody.faces = faces-1;
+	
     arma::mat landmarksIdxes;
     landmarksIdxes.load(dataDir+"landmarksIdxs73.mat");
 //    cout<<"Landmark indexes loaded: "<<landmarksIdxes.n_rows<<endl;
@@ -584,10 +585,28 @@ void fitMesh::loadTemplate()
 	tempbody.pose_params = zeros(1, params.nPose);
     tempbody.points_idxes.clear();
     tempbody.nPoints = tempbody.points.n_rows;
-	for (uint32_t i = 0; i < tempbody.nPoints; i++)
-    {
-        tempbody.points_idxes.push_back(i);
-    }
+	//useless, just use an increasing idx
+	//for (uint32_t i = 0; i < tempbody.nPoints; i++)
+    //    tempbody.points_idxes.push_back(i);
+    
+	//prepare tpFaceMap
+	{
+		tpFaceMap.clear();
+		tpFaceMap.assign(tempbody.nPoints, UINT32_MAX);
+		const double *px = tempbody.faces.memptr(), *py = px + faces.n_rows, *pz = py + faces.n_rows;
+		for (uint32_t i = 0; i < faces.n_rows; ++i)
+		{
+			auto& tx = tpFaceMap[uint32_t(px[i])];
+			if (tx == UINT32_MAX)
+				tx = i;
+			auto& ty = tpFaceMap[uint32_t(py[i])];
+			if (ty == UINT32_MAX)
+				ty = i; 
+			auto& tz = tpFaceMap[uint32_t(pz[i])];
+			if (tz == UINT32_MAX)
+				tz = i;
+		}
+	}
     isVisible = ones<arColIS>(tempbody.points.n_rows);
 //    arma::mat mshape = mean(tempbody.points);
 //    for(int i=0;i<tempbody.nPoints;i++)
@@ -639,18 +658,17 @@ void fitMesh::calculateNormals(const vector<uint32_t> &points_idxes, arma::mat &
     //points with triangle faces, so the sampled indexes is needed
 	if (faces.n_rows <= 0)
     {
-        normals = normals.zeros(points_idxes.size(),3);
+        normals = normals.zeros(tempbody.nPoints,3);
         return;
     }
 
-	const uint32_t nPoints = points_idxes.size();
-    normals = normals.zeros(nPoints,3);
+    normals = normals.zeros(tempbody.nPoints,3);
 
 	uint32_t idx = 0;
     normals.each_row([&](arma::rowvec& row)
     {
-		const auto ret = fitMesh::getVertexFacesIdxEx(points_idxes[idx++], faces);
-		if (ret >= 0)
+		const auto ret = tpFaceMap[idx++];
+		if (ret != UINT32_MAX)
 			row = normals_faces.row(ret);
 		else
 			;//row.zeros(1,3);//row = normal_tmp.zeros(1,3);
@@ -707,16 +725,6 @@ vector<uint32_t> fitMesh::getVertexFacesIdx(int point_idx, arma::mat &faces)
        }
    }
    return pointFacesIdx;
-}
-int32_t fitMesh::getVertexFacesIdxEx(const double point_idx, const arma::mat& faces)
-{
-	const double *px = faces.memptr(), *py = px + faces.n_rows, *pz = py + faces.n_rows;
-	for (uint32_t i = 0; i < faces.n_rows; ++i)
-	{
-		if (px[i] == point_idx || py[i] == point_idx || pz[i] == point_idx)
-			return i;
-	}
-	return -1;
 }
 
 arma::vec searchShoulder(arma::mat model, const unsigned int lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
@@ -1349,8 +1357,8 @@ void fitMesh::showResult(bool isNN=false)
     else
     {
         arma::mat normalsSM, normals_faces;
-        calculateNormalsFaces(pointsSM,tempbody.faces,normals_faces);
-        calculateNormals(tempbody.points_idxes,tempbody.faces,normalsSM,normals_faces);
+		calculateNormalsFaces(pointsSM, tempbody.faces, normals_faces);
+		calculateNormals(tempbody.points_idxes, tempbody.faces, normalsSM, normals_faces);
 
 		showPoints(cloud, pointsSM, normalsSM, pcl::PointXYZRGB(0, 192, 0));
 //        arma::mat pointsorig,jointsorig;

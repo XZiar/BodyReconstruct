@@ -990,6 +990,7 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 			vPoints[i].assign(res);
 		}
 	}
+	delete[] Mvert;
 }
 void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth, const bool force)
 {
@@ -1676,45 +1677,36 @@ int CMesh::updateJntPos()
 	CVector<float> minEle; minEle.setSize(mNumPoints);
 	CVector<float> singleWts; singleWts.setSize(mNumPoints); singleWts = 0;
 
-	for (int i0 = 0; i0 < mJointNumber; i0++)
+	static const uint8_t idxmap[][3] = //i0,i1,i1*3
+	{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 },
+	{ 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
+
+	for (uint32_t a = 0; a < 14; ++a)
 	{
-		for (int i1 = 0; i1 < mJointNumber; i1++)
-		{
-			if (
+		const int i0 = idxmap[a][0], i1 = idxmap[a][1], i1x3 = idxmap[a][2];
+		bool anyMinIsNotZero = minMLab(weightMatrix, i0, i1, minEle);
 
-				(i0 == 2 && i1 == 0) || (i0 == 3 && i1 == 2) || (i0 == 4 && i1 == 3) ||
-				(i0 == 6 && i1 == 0) || (i0 == 7 && i1 == 6) || (i0 == 8 && i1 == 7) ||
-				(i0 == 10 && i1 == 0) || (i0 == 11 && i1 == 10) || (i0 == 14 && i1 == 10) ||
-				(i0 == 15 && i1 == 14) || (i0 == 16 && i1 == 15) || (i0 == 19 && i1 == 10) ||
-				(i0 == 20 && i1 == 19) || (i0 == 21 && i1 == 20)
-
-				)
-			{
-				bool anyMinIsNotZero = minMLab(weightMatrix, i0, i1, minEle);
-
-				if (anyMinIsNotZero)
-				{	//printf("\nNon-zero min wt bw joints %d and %d", i0+1, i1+1);
-					componet_wise_mul_with_pnts(minEle, tmpMatrix);
-					double sumMinEle = sumTheVector(minEle); 
-					assert(sumMinEle > 0);
-					miniBLAS::Vertex sum;
-					tmpMatrix.sumToY3(sum);
-					sum /= sumMinEle;
-					joints0.putToY3(sum, i0, 3 * i1);
-					//below are pieces of shit.
-					/*
-					CVector<float> t1; t1.setSize(tmpMatrix.ySize());
-					sumTheMatrix(tmpMatrix, t1);
-					newJnt(0) = t1(0) / sumMinEle;
-					newJnt(1) = t1(1) / sumMinEle;
-					newJnt(2) = t1(2) / sumMinEle;
-					//what the fuck are you doing, newJnt?
-					joints0(i0, 3 * i1 + 0) = newJnt(0);
-					joints0(i0, 3 * i1 + 1) = newJnt(1);
-					joints0(i0, 3 * i1 + 2) = newJnt(2);
-					*/
-				}
-			}
+		if (anyMinIsNotZero)
+		{	//printf("\nNon-zero min wt bw joints %d and %d", i0+1, i1+1);
+			componet_wise_mul_with_pnts(minEle, tmpMatrix);
+			double sumMinEle = sumTheVector(minEle);
+			assert(sumMinEle > 0);
+			miniBLAS::Vertex sum;
+			tmpMatrix.sumToY3(sum);
+			sum /= sumMinEle;
+			joints0.putToY3(sum, i0, i1x3);
+			//below are pieces of shit.
+			/*
+			CVector<float> t1; t1.setSize(tmpMatrix.ySize());
+			sumTheMatrix(tmpMatrix, t1);
+			newJnt(0) = t1(0) / sumMinEle;
+			newJnt(1) = t1(1) / sumMinEle;
+			newJnt(2) = t1(2) / sumMinEle;
+			//what the fuck are you doing, newJnt?
+			joints0(i0, 3 * i1 + 0) = newJnt(0);
+			joints0(i0, 3 * i1 + 1) = newJnt(1);
+			joints0(i0, 3 * i1 + 2) = newJnt(2);
+			*/
 		}
 	}
 	//below are all useless
@@ -1775,16 +1767,14 @@ int CMesh::updateJntPos()
 	nonRoots.insert(23); nonRoots.insert(24);
 	nonRoots.insert(25);
 
-	float tmp[3];
 	for (unsigned int i0 = 0; i0 < mJointNumber; i0++)
 	{
 		int jId = i0 + 1;
 		if (nonRoots.count(jId) != 0)
 		{	//non root joints
-
-			tmp[0] = newJntPos(i0, 0) = joints0(i0, (parentMap[i0] - 1) * 3 + 0);
-			tmp[1] = newJntPos(i0, 1) = joints0(i0, (parentMap[i0] - 1) * 3 + 1);
-			tmp[2] = newJntPos(i0, 2) = joints0(i0, (parentMap[i0] - 1) * 3 + 2);
+			newJntPos(i0, 0) = joints0(i0, (parentMap[i0] - 1) * 3 + 0);
+			newJntPos(i0, 1) = joints0(i0, (parentMap[i0] - 1) * 3 + 1);
+			newJntPos(i0, 2) = joints0(i0, (parentMap[i0] - 1) * 3 + 2);
 		}
 	}
 	copyJointPos(1, 2, newJntPos);
@@ -1801,13 +1791,11 @@ int CMesh::updateJntPos()
 	for (unsigned int i0 = 0; i0 < mJointNumber; i0++)
 	{
 		unsigned int jId = i0 + 1;
-		CVector<float> aDir = mJoint(jId).getDirection();
-		CVector<float> jPos; jPos.setSize(3);
-
+		CVector<float> jPos(3);
 		jPos(0) = newJntPos(i0, 0);
 		jPos(1) = newJntPos(i0, 1);
 		jPos(2) = newJntPos(i0, 2);
-		mJoint(jId).set(aDir, jPos);
+		mJoint(i0 + 1).setPoint(jPos);
 	}
 	return 1;
 }
