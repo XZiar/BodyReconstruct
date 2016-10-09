@@ -36,8 +36,15 @@ using std::string;
 using std::ifstream;
 using std::make_pair;
 using std::vector;
-// C J O I N T -----------------------------------------------------------------
 
+
+static void showfloat4(const char *name, const __m128 *data)
+{
+	float* ptr = (float*)data;
+	printf("%s = %f,%f,%f,%f\n", name, ptr[0], ptr[1], ptr[2], ptr[3]);
+}
+
+// C J O I N T -----------------------------------------------------------------
 // constructor
 CJoint::CJoint(CVector<float>& aDirection, CVector<float>& aPoint, int aParent)
 {
@@ -625,18 +632,32 @@ void CMesh::prepareData()
 {
 	//prepare vPoints
 	using miniBLAS::Vertex;
-	vPoints.resize(mNumPoints);
-	ptSmooth.resize(mNumPoints * mNumSmooth);
-	for (uint32_t a = 0, i = 0; a < mNumPoints; ++a)
+	vPoints.resize(mNumPoints + 3);//at lest multiply of 4
+	ptSmooth.clear();
+	smtCnt.resize(mNumPoints);
+	for (uint32_t a = 0; a < mNumPoints; ++a)
 	{
+		uint8_t scnt = 0;
 		const float *ptr = mPoints[a].data();
 		vPoints[a].assign(ptr);
-		for (uint32_t c = 0; c < mNumSmooth; i++, c++)
+		for (uint32_t c = 0; c < mNumSmooth; c++)
 		{
-			ptSmooth[i].idx = (uint32_t)ptr[3 + 2 * c];
-			ptSmooth[i].weight = ptr[4 + 2 * c];
+			const float weight = ptr[4 + 2 * c];
+			if (weight > 10e-6)//take it
+			{
+				scnt++;
+				ptSmooth.push_back({ (uint32_t)ptr[3 + 2 * c], weight });
+			}
 		}
+		if (scnt == 0)
+		{
+			smtCnt[a] = 0;
+			ptSmooth.push_back({ 1, 0 });
+		}
+		else
+			smtCnt[a] = scnt - 1;
 	}
+	theSmtCnt = &smtCnt[0];
 	thePtSmooth = &ptSmooth[0];
 }
 
@@ -972,19 +993,22 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 	{
 		for (int i = 0, iSmt = 0; i < mNumPoints; i++)
 		{
-			__m128 res = _mm_setzero_ps();
 			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
-			for (int n = mNumSmooth; n--; ++iSmt)
+			const Vertex(&trans)[3] = Mvert[thePtSmooth[iSmt].idx];
+			__m128 res = _mm_mul_ps(_mm_set1_ps(thePtSmooth[iSmt++].weight), _mm_blend_ps
+			(
+				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+			)/*x,y,z,0*/);
+			for (uint8_t n = theSmtCnt[i]; n--; ++iSmt)
 			{
 				const Vertex(&trans)[3] = Mvert[thePtSmooth[iSmt].idx];
-				res = _mm_add_ps
-				(res, _mm_mul_ps
-				(_mm_set1_ps(thePtSmooth[iSmt].weight), _mm_blend_ps
-				(
-					_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-					_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-				)/*x,y,z,0*/
-				)
+				res = _mm_add_ps(res,
+					_mm_mul_ps(_mm_set1_ps(thePtSmooth[iSmt].weight), _mm_blend_ps
+					(
+						_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+						_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+					)/*x,y,z,0*/)
 				);
 			}
 			vPoints[i].assign(res);
@@ -1277,6 +1301,7 @@ CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
 	//avoid overhead of copying data unecessarily
 	theWgtMat = from.theWgtMat;
 	thePtSmooth = from.thePtSmooth;
+	theSmtCnt = from.theSmtCnt;
 	if (pointsIn == nullptr)
 		vPoints = from.vPoints;
 	else
@@ -1619,12 +1644,6 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-static void showfloat4(const char *name, const __m128 *data)
-{
-	float* ptr = (float*)data;
-	printf("%s = %f,%f,%f,%f\n", name, ptr[0], ptr[1], ptr[2], ptr[3]);
-}
-
 void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
 {
 	using miniBLAS::Vertex;
@@ -1845,8 +1864,8 @@ void CMesh::updateJntPosEx()
 
 	CMatrix<float> newJntPos; newJntPos.setSize(mJointNumber, 3); //3D joints
 	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
-
-	uint32_t xgap = (mNumPoints + 3) / 4;
+	/*
+	const uint32_t xgap = (mNumPoints + 3) / 4;
 	Vertex *wgtMin = new Vertex[xgap];
 	for (uint32_t a = 0; a < 14; ++a)
 	{
@@ -1864,6 +1883,34 @@ void CMesh::updateJntPosEx()
 		if (sumMinEle > 0.0f)
 		{
 			__m128 sum = _mm_setzero_ps();
+			{// componet_wise_mul_with_pnts and sum it
+				const Vertex *__restrict pVMin = wgtMin;
+				const Vertex *__restrict pOri = &vPoints[0];
+				for (uint32_t b = xgap; b--; pOri += 4)
+				{
+					const __m128 wgt = *pVMin++;
+					sum = _mm_add_ps
+					(
+						_mm_add_ps
+						(
+							sum, _mm_add_ps
+							(
+								_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(0, 0, 0, 0)), pOri[0]),
+								_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(1, 1, 1, 1)), pOri[1])
+							)
+						),
+						_mm_add_ps
+						(
+							_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(2, 2, 2, 2)), pOri[2]),
+							_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(3, 3, 3, 3)), pOri[3])
+						)
+					);
+				}
+			}
+			const Vertex p4(sum);
+			const Vertex puter(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
+
+			sum = _mm_setzero_ps();
 			{// componet_wise_mul_with_pnts and sum it
 				const float *pFMin = wgtMin[0];
 				const Vertex *__restrict pOri = &vPoints[0];
@@ -1891,11 +1938,66 @@ void CMesh::updateJntPosEx()
 					break;
 				}
 			}
-			const Vertex puter(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
-			joints0.putToY3(puter, idxmap[a][0], idxmap[a][2]);
+			const Vertex p3(sum);
+			const Vertex puter2(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
+
+			sum = _mm_setzero_ps();
+			{// componet_wise_mul_with_pnts and sum it
+				const float *pFMin = wgtMin[0];
+				const Vertex *__restrict pOri = &vPoints[0];
+				for (uint32_t b = mNumPoints; b--;)
+					sum = _mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(*pFMin++), *pOri++));
+			}
+			const Vertex p1(sum);
+			const Vertex puter0(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
+
+			const Vertex diffV4 = p4 - p1, diffV3 = p3 - p1;
+			float diff4 = std::abs(diffV4.x) + std::abs(diffV4.y) + std::abs(diffV4.z);
+			float diff3 = std::abs(diffV3.x) + std::abs(diffV3.y) + std::abs(diffV3.z);
+			if (diff4 > 1 || diff3 > 1)
+			{
+				printf("diff %f vs %f here---------\n", diff3, diff4);
+				showfloat4("per1", (__m128*)&p1);
+				showfloat4("per3", (__m128*)&p3);
+				showfloat4("per4", (__m128*)&p4);
+				showfloat4("diff3", (__m128*)&diffV3);
+				showfloat4("diff4", (__m128*)&diffV4);
+				getchar();
+			}
+			joints0.putToY3(puter0, idxmap[a][0], idxmap[a][2]);
 		}
 	}
 	delete[] wgtMin;
+	*/
+
+	const uint32_t xgap = (mNumPoints + 3) / 4;
+	for (uint32_t a = 0; a < 14; ++a)
+	{
+		//calc min
+		__m128 sumvec = _mm_setzero_ps(), sumPosA = _mm_setzero_ps(), sumPosB = _mm_setzero_ps();
+		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * xgap,
+			*__restrict vb = theWgtMat + idxmap[a][1] * xgap,
+			*__restrict pOri = &vPoints[0];
+		for (uint32_t b = xgap; b--; pOri += 4)
+		{
+			const __m128 wgt = _mm_min_ps(*va++, *vb++);
+			sumvec = _mm_add_ps(sumvec, wgt);
+			sumPosA = _mm_add_ps(sumPosA, _mm_add_ps
+			(
+				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(0, 0, 0, 0)), pOri[0]),
+				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(1, 1, 1, 1)), pOri[1])
+			));
+			sumPosB = _mm_add_ps(sumPosB, _mm_add_ps
+			(
+				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(2, 2, 2, 2)), pOri[2]),
+				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(3, 3, 3, 3)), pOri[3])
+			));
+		}
+		sumvec = _mm_hadd_ps(sumvec, sumvec);
+		sumvec = _mm_hadd_ps(sumvec, sumvec);
+		const Vertex puter(_mm_div_ps(_mm_add_ps(sumPosA, sumPosB), sumvec));
+		joints0.putToY3(puter, idxmap[a][0], idxmap[a][2]);
+	}
 
 	const static Vertex sum(true);
 	newJntPos.putToY3(sum, 0, 0);
