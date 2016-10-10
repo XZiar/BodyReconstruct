@@ -622,12 +622,38 @@ void CMesh::prepareData()
 	{
 		wMatGap = ((mNumPoints + 7) / 4) & 0xfffffffe;
 		wgtMat.resize(wMatGap*mJointNumber);
-		theWgtMat = &wgtMat[0];
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
 		const uint32_t ept = 4 - (mNumPoints & 0x3);
 		for (uint32_t a = 0; a < mJointNumber; ++a)
 			memcpy(&wgtMat[a*wMatGap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
+	}
+	{
+		static const uint8_t idxmap[][3] = //i0,i1,i1*3
+		{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 },
+		{ 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
+		minWgtMat.resize(wMatGap * 14);
+		theMinWgtMat = &minWgtMat[0];
+		memset(&minWgtMat[0], 0x0, wMatGap * 14 * sizeof(Vertex));
+		Vertex *__restrict vo = &minWgtMat[0];
+		const __m256 helper = _mm256_set1_ps(1);
+		uint32_t idx = 0;
+		for (const uint8_t(&item)[3] : idxmap)
+		{
+			//calc min
+			const Vertex *__restrict va = &wgtMat[0] + item[0] * wMatGap, *__restrict vb = &wgtMat[0] + item[1] * wMatGap;
+			__m256 sumvec = _mm256_setzero_ps();
+			for (uint32_t a = wMatGap / 2; a--; vo += 2, va += 2, vb += 2)
+			{
+				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb));
+				sumvec = _mm256_add_ps(sumvec, minM);
+				_mm256_stream_ps((float*)vo, minM);
+			}
+			sumvec = _mm256_hadd_ps(sumvec, sumvec);
+			sumvec = _mm256_hadd_ps(sumvec, sumvec);
+			sumvec = _mm256_add_ps(sumvec, _mm256_permute2f128_ps(sumvec, sumvec, 0b00000001));
+			minEleSum[idx++].assign(_mm256_castps256_ps128(sumvec));
+		}
 	}
 	//prepare vPoints & smooth
 	vPoints.resize(mNumPoints + 7);//at lest multiply of 8
@@ -1483,8 +1509,10 @@ void CMesh::operator=(const CMesh& aMesh)
 	weightMatrix = aMesh.weightMatrix;
 
 	wgtMat = aMesh.wgtMat;
+	minWgtMat = aMesh.minWgtMat;
+	memcpy(minEleSum, aMesh.minEleSum, sizeof(minEleSum));
 	wMatGap = aMesh.wMatGap;
-	theWgtMat = &wgtMat[0];
+	theMinWgtMat = &minWgtMat[0];
 	vPoints = aMesh.vPoints;
 	ptSmooth = aMesh.ptSmooth;
 	thePtSmooth = &ptSmooth[0];
@@ -1519,7 +1547,8 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 
 	//avoid overhead of copying data unecessarily
 	wMatGap = from.wMatGap;
-	theWgtMat = from.theWgtMat;
+	memcpy(minEleSum, from.minEleSum, sizeof(minEleSum));
+	theMinWgtMat = from.theMinWgtMat;
 	thePtSmooth = from.thePtSmooth;
 	theSmtCnt = from.theSmtCnt;
 	if (pointsIn == nullptr)
@@ -2084,123 +2113,17 @@ void CMesh::updateJntPosEx()
 
 	CMatrix<float> newJntPos; newJntPos.setSize(mJointNumber, 3); //3D joints
 	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
-	/*
-	const uint32_t xgap = (mNumPoints + 3) / 4;
-	Vertex *wgtMin = new Vertex[xgap];
-	for (uint32_t a = 0; a < 14; ++a)
+
+	const Vertex *__restrict pMinWgt = theMinWgtMat;
+	uint32_t mIdx = 0;
+	for (const uint8_t(&item)[3] : idxmap)
 	{
 		//calc min
-		__m128 sumvec = _mm_setzero_ps(), sumtmp;
-		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * xgap, *__restrict vb = theWgtMat + idxmap[a][1] * xgap;
-		for (uint32_t b = 0; b < xgap; b++)
-		{
-			sumtmp = _mm_min_ps(*va++, *vb++);
-			wgtMin[b].assign(sumtmp);
-			sumvec = _mm_add_ps(sumvec, sumtmp);
-		}
-		const Vertex sumV(sumvec);
-		const float sumMinEle = (sumV.x + sumV.y) + (sumV.z + sumV.w);
-		if (sumMinEle > 0.0f)
-		{
-			__m128 sum = _mm_setzero_ps();
-			{// componet_wise_mul_with_pnts and sum it
-				const Vertex *__restrict pVMin = wgtMin;
-				const Vertex *__restrict pOri = &vPoints[0];
-				for (uint32_t b = xgap; b--; pOri += 4)
-				{
-					const __m128 wgt = *pVMin++;
-					sum = _mm_add_ps
-					(
-						_mm_add_ps
-						(
-							sum, _mm_add_ps
-							(
-								_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(0, 0, 0, 0)), pOri[0]),
-								_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(1, 1, 1, 1)), pOri[1])
-							)
-						),
-						_mm_add_ps
-						(
-							_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(2, 2, 2, 2)), pOri[2]),
-							_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(3, 3, 3, 3)), pOri[3])
-						)
-					);
-				}
-			}
-			const Vertex p4(sum);
-			const Vertex puter(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
-
-			sum = _mm_setzero_ps();
-			{// componet_wise_mul_with_pnts and sum it
-				const float *pFMin = wgtMin[0];
-				const Vertex *__restrict pOri = &vPoints[0];
-				for (uint32_t b = mNumPoints / 3; b--; pFMin += 3, pOri += 3)
-					sum = _mm_add_ps
-					(
-						_mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(pFMin[0]), pOri[0])),
-						_mm_add_ps
-						(
-							_mm_mul_ps(_mm_set1_ps(pFMin[1]), pOri[1]),
-							_mm_mul_ps(_mm_set1_ps(pFMin[2]), pOri[2])
-						)
-					);
-				switch (mNumPoints % 3)
-				{
-				case 1:
-					sum = _mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(*pFMin), *pOri));
-					break;
-				case 2:
-					sum = _mm_add_ps
-					(
-						_mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(pFMin[0]), pOri[0])),
-						_mm_mul_ps(_mm_set1_ps(pFMin[1]), pOri[1])
-					);
-					break;
-				}
-			}
-			const Vertex p3(sum);
-			const Vertex puter2(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
-
-			sum = _mm_setzero_ps();
-			{// componet_wise_mul_with_pnts and sum it
-				const float *pFMin = wgtMin[0];
-				const Vertex *__restrict pOri = &vPoints[0];
-				for (uint32_t b = mNumPoints; b--;)
-					sum = _mm_add_ps(sum, _mm_mul_ps(_mm_set1_ps(*pFMin++), *pOri++));
-			}
-			const Vertex p1(sum);
-			const Vertex puter0(_mm_div_ps(sum, _mm_set1_ps(sumMinEle)));
-
-			const Vertex diffV4 = p4 - p1, diffV3 = p3 - p1;
-			float diff4 = std::abs(diffV4.x) + std::abs(diffV4.y) + std::abs(diffV4.z);
-			float diff3 = std::abs(diffV3.x) + std::abs(diffV3.y) + std::abs(diffV3.z);
-			if (diff4 > 1 || diff3 > 1)
-			{
-				printf("diff %f vs %f here---------\n", diff3, diff4);
-				showfloat4("per1", (__m128*)&p1);
-				showfloat4("per3", (__m128*)&p3);
-				showfloat4("per4", (__m128*)&p4);
-				showfloat4("diff3", (__m128*)&diffV3);
-				showfloat4("diff4", (__m128*)&diffV4);
-				getchar();
-			}
-			joints0.putToY3(puter0, idxmap[a][0], idxmap[a][2]);
-		}
-	}
-	delete[] wgtMin;
-	*/
-
-	for (uint32_t a = 0; a < 14; ++a)
-	{
-		//calc min
-		__m128 sumvec = _mm_setzero_ps(), sumPosA = _mm_setzero_ps(), sumPosB = _mm_setzero_ps();
-		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * wMatGap,
-			*__restrict vb = theWgtMat + idxmap[a][1] * wMatGap,
-			*__restrict pOri = &vPoints[0];
+		__m128 sumPosA = _mm_setzero_ps(), sumPosB = _mm_setzero_ps();
+		const Vertex *__restrict pOri = &vPoints[0];
 		for (uint32_t b = wMatGap; b--; pOri += 4)
 		{
-			const __m128 wgt = _mm_min_ps(*va++, *vb++);
-			sumvec = _mm_add_ps(sumvec, wgt);
+			const __m128 wgt = *pMinWgt++;
 			sumPosA = _mm_add_ps(sumPosA, _mm_add_ps
 			(
 				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(0, 0, 0, 0)), pOri[0]),
@@ -2212,10 +2135,9 @@ void CMesh::updateJntPosEx()
 				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(3, 3, 3, 3)), pOri[3])
 			));
 		}
-		sumvec = _mm_hadd_ps(sumvec, sumvec);
-		sumvec = _mm_hadd_ps(sumvec, sumvec);
-		const Vertex puter(_mm_div_ps(_mm_add_ps(sumPosA, sumPosB), sumvec));
-		joints0.putToY3(puter, idxmap[a][0], idxmap[a][2]);
+
+		const Vertex puter(_mm_div_ps(_mm_add_ps(sumPosA, sumPosB), minEleSum[mIdx++]));
+		joints0.putToY3(puter, item[0], item[2]);
 	}
 
 	const static Vertex sum(true);
@@ -2243,6 +2165,15 @@ void CMesh::updateJntPosEx()
 	parentMap[24] = 24;
 	parentMap[25] = 25;
 
+	const static uint32_t nonRootId[] = { 2,3,4,6,7,8,10,11,14,15,16,19,20,21,22,23,24 };
+	for (const uint32_t id : nonRootId)
+	{
+		const int tmp = (parentMap[id] - 1) * 3;
+		newJntPos(id, 0) = joints0(id, tmp);
+		newJntPos(id, 1) = joints0(id, tmp + 1);
+		newJntPos(id, 2) = joints0(id, tmp + 2);
+	}
+	/*
 	const static std::set<uint32_t> nonRoots{ 3,4,5,7,8,9,11,12,15,16,17,20,21,22,23,24,25 }; //has jId's
 	for (uint32_t i0 = 0; i0 < mJointNumber; i0++)
 	{
@@ -2254,6 +2185,7 @@ void CMesh::updateJntPosEx()
 			newJntPos(i0, 2) = joints0(i0, tmp + 2);
 		}
 	}
+	}*/
 	copyJointPos(1, 2, newJntPos);
 	copyJointPos(5, 6, newJntPos);
 	copyJointPos(9, 10, newJntPos);

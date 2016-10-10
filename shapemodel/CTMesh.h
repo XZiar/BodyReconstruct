@@ -234,7 +234,9 @@ protected:
 	const SmoothParam *thePtSmooth = nullptr;
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
-	const miniBLAS::Vertex *theWgtMat = nullptr;
+	miniBLAS::VertexVec minWgtMat;
+	const miniBLAS::Vertex *theMinWgtMat = nullptr;
+	miniBLAS::Vertex minEleSum[14];
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;
