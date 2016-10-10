@@ -107,6 +107,7 @@ public:
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
 	int updateJntPos();
 	void updateJntPosEx();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);

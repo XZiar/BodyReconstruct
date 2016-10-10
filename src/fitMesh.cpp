@@ -959,6 +959,8 @@ void fitMesh::fitShapePose()
     //showResult(false);
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
+	printf("POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	printf("SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
 	if (!isVtune)
 	{
 		while (!viewer.wasStopped())
@@ -1049,7 +1051,7 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
     cout<<"construct problem: pose\n";
 	Problem problem;
 
-	if (isFastCost)
+	if (true)
 	{
 		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctorEx, ceres::CENTRAL, 6449 * 3, POSPARAM_NUM>
 			(new PoseCostFunctorEx(&shapepose, shapeParam, isValidNN, idxNN, scanbody.points));
@@ -1079,6 +1081,7 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
     ceres::Solve(options, &problem, &summary);
 
     cout << summary.BriefReport() << "\n";
+	tSPose += runtime; cSPose += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
 	printf("poseCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
 }
@@ -1090,7 +1093,8 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     Problem problem;
 	cout << "construct problem: SHAPE\n";
 
-	if (isFastCost)
+	shapepose.isFastFitShape = isFastCost;
+	if (true)
 	{
 		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx, ceres::CENTRAL, 6449 * 3, SHAPEPARAM_NUM>
 			(new ShapeCostFunctorEx(&shapepose, poseParam, isValidNN, idxNN, scanbody.points, scale));
@@ -1118,6 +1122,8 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
     cout << summary.BriefReport() << "\n";
+
+	tSShape += runtime; cSShape += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
 	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
 

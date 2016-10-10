@@ -72,6 +72,8 @@ public:
     arColIS isVisible;
 	cv::Mat idxsNN_;
 	arColIS isValidNN_;
+	double tSPose = 0, tSShape = 0;
+	uint32_t cSPose = 0, cSShape = 0;
 
     CParams params;
     arma::mat evectors;//the eigen vetors of the body shape model

@@ -160,16 +160,20 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	// Read object model
 	CMesh initMesh(initMesh_bk, nullptr);
 
-	Vertex vShape[5];
+	Vertex vShape[6];
+	bool isAlign32 = (intptr_t(vShape) & 0x10) == 0;
 	{
-		float *__restrict pShape = vShape[0];
+		float *__restrict pShape = isAlign32 ? vShape[0] : vShape[1];
 		const float *pEV = evalue[0];
 		for (uint32_t a = 0; a < 20; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
+	if (isFastFitShape)
+		initMesh.fastShapeChangesToMesh_AVX(isAlign32 ? vShape : vShape + 1, &evecCache[0]);
+	else
+		initMesh.fastShapeChangesToMesh(isAlign32 ? vShape : vShape + 1, &evecCache[0]);
 
 	// update joints
 	initMesh.updateJntPosEx();

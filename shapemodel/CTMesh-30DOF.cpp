@@ -1938,6 +1938,53 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	}
 }
 
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+{
+	using miniBLAS::Vertex;
+	const uint32_t numEigenVectors = 20;
+	//row * col(3) * z(20 = 5Vertex)
+	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
+	const __m128 sp5 = shapeParamsIn[4];
+	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp23 = _mm256_permute2f128_ps(sp12, sp34, 0b00100001);
+	const __m256 sp51 = _mm256_set_m128(shapeParamsIn[0], sp5), sp45 = _mm256_set_m128(sp5, shapeParamsIn[3]);
+	const Vertex *__restrict pEvec = eigenVectorsIn;
+	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 15)
+	{
+		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 23, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
+
+		const __m256 addA = _mm256_add_ps
+		(
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
+				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
+				0b00100010),
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
+				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
+				0b01000100)
+		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
+		const __m256 addB = _mm256_add_ps
+		(
+			_mm256_add_ps(
+				_mm256_blend_ps(
+					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
+					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
+				_mm256_set_m128(_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/, vPoints[row])/*x,y,z,1;0,0,sz5,0*/
+			)/*sx05,sy0,sz0,1;0,sy1,sz5,0*/,
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
+				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
+				0b00100010)
+		)/*sx05,sy04,sz03,1;0,sy15,sz45,0*/;
+		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx0135,sy024,sz013,1;sx24,sy135,sz245,0*/;
+		const __m256 addBA = _mm256_permute2f128_ps(addAB, addAB, 0b01);
+		vPoints[row].assign(_mm256_castps256_ps128(_mm256_add_ps(addAB, addBA)));
+	}
+}
+
 int CMesh::updateJntPos()
 {
 	// cout << "\nUpdating Joints.. ";	

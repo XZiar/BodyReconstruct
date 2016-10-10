@@ -18,6 +18,7 @@ private:
 		const uint32_t numEigenVectors, double* pointsOut, double* jointsOut);
 
 public:
+	bool isFastFitShape = false;
 	CShapePose();
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn);
 	miniBLAS::VertexVec getModelByPose(const miniBLAS::VertexVec& basePoints, const double *__restrict poseParamsIn);
