@@ -629,25 +629,28 @@ void CMesh::prepareData()
 			memcpy(&wgtMat[a*wMatGap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
 	}
 	{
-		static const uint8_t idxmap[][3] = //i0,i1,i1*3
-		{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 },
-		{ 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
+		static const uint8_t idxmap[][2] = //i0,i1
+		{ { 2,0 },{ 3,2 },{ 4,3 },{ 6,0 },{ 7,6 },{ 8,7 },{ 10,0 },{ 11,10 }, { 14,10 },{ 15,14 },{ 16,15 },{ 19,10 },{ 20,19 },{ 21,20 } };
 		minWgtMat.resize(wMatGap * 14);
 		theMinWgtMat = &minWgtMat[0];
 		memset(&minWgtMat[0], 0x0, wMatGap * 14 * sizeof(Vertex));
 		Vertex *__restrict vo = &minWgtMat[0];
 		const __m256 helper = _mm256_set1_ps(1);
 		uint32_t idx = 0;
-		for (const uint8_t(&item)[3] : idxmap)
+		for (const uint8_t(&item)[2] : idxmap)
 		{
 			//calc min
 			const Vertex *__restrict va = &wgtMat[0] + item[0] * wMatGap, *__restrict vb = &wgtMat[0] + item[1] * wMatGap;
 			__m256 sumvec = _mm256_setzero_ps();
 			for (uint32_t a = wMatGap / 2; a--; vo += 2, va += 2, vb += 2)
 			{
-				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb));
+				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb))/*01234567*/;
 				sumvec = _mm256_add_ps(sumvec, minM);
-				_mm256_stream_ps((float*)vo, minM);
+				//pre-compute interlanced matrix
+				__m256 mA = _mm256_permute_ps(minM, 0b10001101);
+				mA = _mm256_permute2f128_ps(mA, mA, 0b00000001);
+				__m256 mB = _mm256_permute_ps(minM, 0b11011000);
+				_mm256_stream_ps(vo[0], _mm256_blend_ps(mA, mB, 0b11000011)/*02461357*/);
 			}
 			sumvec = _mm256_hadd_ps(sumvec, sumvec);
 			sumvec = _mm256_hadd_ps(sumvec, sumvec);
@@ -2107,37 +2110,37 @@ static void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
 void CMesh::updateJntPosEx()
 {
 	using miniBLAS::Vertex;
-	static const uint8_t idxmap[][3] = //i0,i1,i1*3
-	{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 },
-	{ 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
+	static const uint8_t idxmap[][2] = //i0,i1*3
+	{ { 2,0 },{ 3,6 },{ 4,9 },{ 6,0 },{ 7,18 },{ 8,21 },{ 10,0 },{ 11,30 }, { 14,30 },{ 15,42 },{ 16,45 },{ 19,30 },{ 20,57 },{ 21,60 } };
 
 	CMatrix<float> newJntPos; newJntPos.setSize(mJointNumber, 3); //3D joints
 	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
 
 	const Vertex *__restrict pMinWgt = theMinWgtMat;
 	uint32_t mIdx = 0;
-	for (const uint8_t(&item)[3] : idxmap)
+	for (const uint8_t(&item)[2] : idxmap)
 	{
 		//calc min
-		__m128 sumPosA = _mm_setzero_ps(), sumPosB = _mm_setzero_ps();
+		__m256 sumPosA = _mm256_setzero_ps(), sumPosB = _mm256_setzero_ps();
 		const Vertex *__restrict pOri = &vPoints[0];
-		for (uint32_t b = wMatGap; b--; pOri += 4)
+		for (uint32_t b = wMatGap / 2; b--; pOri += 8, pMinWgt += 2)
 		{
-			const __m128 wgt = *pMinWgt++;
-			sumPosA = _mm_add_ps(sumPosA, _mm_add_ps
+			const __m256 wgt = _mm256_load_ps(pMinWgt[0]);
+			sumPosA = _mm256_add_ps(sumPosA, _mm256_add_ps
 			(
-				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(0, 0, 0, 0)), pOri[0]),
-				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(1, 1, 1, 1)), pOri[1])
+				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b00000000), _mm256_load_ps(pOri[0])),
+				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b01010101), _mm256_load_ps(pOri[2]))
 			));
-			sumPosB = _mm_add_ps(sumPosB, _mm_add_ps
+			sumPosB = _mm256_add_ps(sumPosB, _mm256_add_ps
 			(
-				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(2, 2, 2, 2)), pOri[2]),
-				_mm_mul_ps(_mm_shuffle_ps(wgt, wgt, _MM_SHUFFLE(3, 3, 3, 3)), pOri[3])
+				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b10101010), _mm256_load_ps(pOri[4])),
+				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b11111111), _mm256_load_ps(pOri[6]))
 			));
 		}
-
-		const Vertex puter(_mm_div_ps(_mm_add_ps(sumPosA, sumPosB), minEleSum[mIdx++]));
-		joints0.putToY3(puter, item[0], item[2]);
+		sumPosA = _mm256_add_ps(sumPosA, sumPosB);
+		sumPosA = _mm256_add_ps(sumPosA, _mm256_permute2f128_ps(sumPosA, sumPosA, 0b00000001));
+		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), minEleSum[mIdx++]));
+		joints0.putToY3(puter, item[0], item[1]);
 	}
 
 	const static Vertex sum(true);
@@ -2173,19 +2176,7 @@ void CMesh::updateJntPosEx()
 		newJntPos(id, 1) = joints0(id, tmp + 1);
 		newJntPos(id, 2) = joints0(id, tmp + 2);
 	}
-	/*
-	const static std::set<uint32_t> nonRoots{ 3,4,5,7,8,9,11,12,15,16,17,20,21,22,23,24,25 }; //has jId's
-	for (uint32_t i0 = 0; i0 < mJointNumber; i0++)
-	{
-		if (nonRoots.count(i0 + 1))//non root joints
-		{	
-			const int tmp = (parentMap[i0] - 1) * 3;
-			newJntPos(i0, 0) = joints0(i0, tmp);
-			newJntPos(i0, 1) = joints0(i0, tmp + 1);
-			newJntPos(i0, 2) = joints0(i0, tmp + 2);
-		}
-	}
-	}*/
+
 	copyJointPos(1, 2, newJntPos);
 	copyJointPos(5, 6, newJntPos);
 	copyJointPos(9, 10, newJntPos);
