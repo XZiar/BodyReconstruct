@@ -71,6 +71,15 @@
     <ClInclude Include="include\miniBLAS.hpp">
       <Filter>header files\include</Filter>
     </ClInclude>
+    <ClInclude Include="shapemodel\CMatrix.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+    <ClInclude Include="shapemodel\CTMesh.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
+    <ClInclude Include="shapemodel\CVector.h">
+      <Filter>header files\include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="BodyReconstruct.pro" />

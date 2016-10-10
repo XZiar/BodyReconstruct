@@ -16,7 +16,7 @@ namespace miniBLAS
 class kdNNTree
 {
 private:
-	std::vector<Vertex> tree[8];
+	miniBLAS::VertexVec tree[8];
 	int judgeIdx(const Vertex& v) const;
 public:
 	kdNNTree() = default;

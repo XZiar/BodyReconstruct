@@ -114,7 +114,7 @@ public:
 	// constructor
 	inline CMesh();
 	inline CMesh(const CMesh& aMesh);
-	CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn);
+	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
 	CMesh(int aPoints, int aPatches);
 	// destructor
 	~CMesh();
@@ -135,6 +135,7 @@ public:
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
+	void rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth = false);
 	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
@@ -220,7 +221,7 @@ public:
 	// Gives access to pose history
 	//inline CVector<CMeshMotion>& history() {return mHistory;};
 
-	std::vector<miniBLAS::Vertex> vPoints;
+	miniBLAS::VertexVec vPoints;
 protected:
 	struct SmoothParam
 	{
@@ -231,7 +232,8 @@ protected:
 	const uint8_t *theSmtCnt = nullptr;
 	std::vector<SmoothParam> ptSmooth;
 	const SmoothParam *thePtSmooth = nullptr;
-	std::vector<miniBLAS::Vertex> wgtMat;
+	miniBLAS::VertexVec wgtMat;
+	uint32_t wMatGap;
 	const miniBLAS::Vertex *theWgtMat = nullptr;
 
 	std::vector<CVector<float> >  mPoints;

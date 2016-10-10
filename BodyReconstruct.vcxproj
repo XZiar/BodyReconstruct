@@ -27,7 +27,10 @@
     <ClInclude Include="include\miniBLAS.hpp" />
     <ClInclude Include="include\tools.h" />
     <ClInclude Include="main.h" />
+    <ClInclude Include="shapemodel\CMatrix.h" />
     <ClInclude Include="shapemodel\cshapepose.h" />
+    <ClInclude Include="shapemodel\CTMesh.h" />
+    <ClInclude Include="shapemodel\CVector.h" />
     <ClInclude Include="Y:\BodyReconstruct\include\kdNNTree.h" />
   </ItemGroup>
   <ItemGroup>
@@ -60,16 +63,16 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make</RemoteBuildCommandLine>
-    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean; make</RemoteReBuildCommandLine>
+    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make -j2</RemoteBuildCommandLine>
+    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean; make -j2</RemoteReBuildCommandLine>
     <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Debug; make clean</RemoteCleanCommandLine>
     <NMakeIncludeSearchPath>Z:\include;Z:\include\c++\5;Z:\include\c++\5\backward;Z:\include\x86_64-linux-gnu;Z:\include\x86_64-linux-gnu\c++\5;Z:\local\include;Z:\local\include\pcl-1.8;Z:\local\include\eigen3;Z:\local\include\vtk-7.0;$(ProjectDir)include;$(ProjectDir)shapemodel;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
     <NMakeForcedIncludes>$(VISUALGDB_DIR)\gcc_compat.h;$(ProjectDir)gcc_Debug.h</NMakeForcedIncludes>
     <LocalRemoteCopySources>false</LocalRemoteCopySources>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make</RemoteBuildCommandLine>
-    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make clean; make</RemoteReBuildCommandLine>
+    <RemoteBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make -j2</RemoteBuildCommandLine>
+    <RemoteReBuildCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make clean; make -j2</RemoteReBuildCommandLine>
     <RemoteCleanCommandLine>cd $(RemoteRootDir)/BodyReconstruct-Release; make clean</RemoteCleanCommandLine>
     <NMakeIncludeSearchPath>Z:\include;Z:\include\c++\5;Z:\include\c++\5\backward;Z:\include\x86_64-linux-gnu;Z:\include\x86_64-linux-gnu\c++\5;Z:\local\include;Z:\local\include\pcl-1.8;Z:\local\include\eigen3;Z:\local\include\vtk-7.0;$(ProjectDir)include;$(ProjectDir)shapemodel;$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
     <NMakeForcedIncludes>$(VISUALGDB_DIR)\gcc_compat.h;$(ProjectDir)gcc_Release.h</NMakeForcedIncludes>

@@ -2,9 +2,13 @@
 
 #include <cstdint>
 #include <cmath>
+#include <vector>
 
 #if defined(__GNUC__)
 #   include <x86intrin.h>
+#   define _mm256_set_m128(/* __m128 */ hi, /* __m128 */ lo)  _mm256_insertf128_ps(_mm256_castps128_ps256(lo), (hi), 0x1)
+#   define _mm256_set_m128d(/* __m128d */ hi, /* __m128d */ lo)  _mm256_insertf128_pd(_mm256_castpd128_pd256(lo), (hi), 0x1)
+#   define _mm256_set_m128i(/* __m128i */ hi, /* __m128i */ lo)  _mm256_insertf128_si256(_mm256_castsi128_si256(lo), (hi), 0x1)
 #   include <malloc.h>
 #   define ALIGN32 __attribute__((aligned(32)))
 #   define ALIGN16 __attribute__((aligned(16)))
@@ -28,6 +32,7 @@ namespace miniBLAS
 class ALIGN16 Vertex;
 class ALIGN16 VertexI;
 
+static const uint32_t Vec4Align = 32;
 template<typename T>
 class ALIGN16 Vec4Base
 {
@@ -52,19 +57,61 @@ protected:
 		};
 	};
 
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, 16);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
 	Vec4Base() { };
 	Vec4Base(const T x_) :x(x_) { };
 	Vec4Base(const T x_, const T y_) :x(x_), y(y_) { };
 	Vec4Base(const T x_, const T y_, const T z_) :x(x_), y(y_), z(z_) { };
 	Vec4Base(const T x_, const T y_, const T z_, const T w_) :x(x_), y(y_), z(z_), w(w_) { };
+
+public:
+	void* operator new(size_t size)
+	{
+		return malloc_align(size, Vec4Align);
+	};
+	void operator delete(void *p)
+	{
+		free_align(p);
+	}
+	void* operator new[](size_t size)
+	{
+		return malloc_align(size, Vec4Align);
+	};
+	void operator delete[](void *p)
+	{
+		free_align(p);
+	}
+};
+
+template<class T>
+struct AlignAllocator : std::allocator<T>
+{
+public:
+	typedef T value_type;
+	typedef T* pointer;
+	typedef const T* const_pointer;
+	typedef T& reference;
+	typedef const T& const_reference;
+
+	template<class U>
+	struct rebind
+	{
+		typedef AlignAllocator<U> other;
+	};
+
+	T* allocate(size_t n, const T *hint = 0)
+	{
+		T* ptr = new T[n];
+		//printf("allocate at %llx\n", ptr);
+		return ptr;
+	}
+	void deallocate(T *p, size_t n)
+	{
+		delete[] p;
+	}
+	size_t max_size() const noexcept
+	{
+		return ((size_t)(-1) / sizeof(T));
+	}
 };
 
 class ALIGN16 Vertex :public Vec4Base<float>
@@ -222,6 +269,7 @@ public:
 	#endif
 	}
 };
+using VertexVec = std::vector<miniBLAS::Vertex, AlignAllocator<miniBLAS::Vertex>>;
 
 class ALIGN16 VertexI :public Vec4Base<int>
 {

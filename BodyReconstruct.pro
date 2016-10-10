@@ -23,7 +23,10 @@ HEADERS += main.h \
 	include/kdNNTree.h \
     include/tools.h \
     include/fitMesh.h \
-    shapemodel/cshapepose.h
+    shapemodel/cshapepose.h \
+	shapemodel/CVector.h \
+	shapemodel/CMatrix.h \
+	shapemodel/CTMesh.h
 
 INCLUDEPATH += \
     include \
@@ -42,9 +45,8 @@ LIBS += /usr/local/lib/libboost_system.so \
         /usr/lib/gcc/x86_64-linux-gnu/5/libgfortran.so \
         -lgomp
 
-QMAKE_CXXFLAGS += -msse4.2
+QMAKE_CXXFLAGS += -mavx
 QMAKE_CXXFLAGS += -g
-QMAKE_CXXFLAGE += -j2
 
 PKGCONFIG += pcl_io-1.8
 PKGCONFIG += opencv

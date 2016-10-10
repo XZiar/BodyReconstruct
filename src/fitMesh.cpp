@@ -18,17 +18,16 @@ using arma::mean;
 using ceres::Problem;
 using ceres::Solver;
 using miniBLAS::Vertex;
+using miniBLAS::VertexVec;
 
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
-static const auto deletor = [=](Vertex* ptr) { free_align(ptr); };
-static unique_ptr<Vertex[], decltype(deletor)> armaTOcache(const arma::mat in)
+static VertexVec armaTOcache(const arma::mat in)
 {
 	const uint32_t cnt = in.n_rows;
-
-	Vertex *__restrict pVert = (Vertex*)malloc_align(sizeof(Vertex) * cnt, 32);
-	unique_ptr<Vertex[], decltype(deletor)> cache(pVert, deletor);
+	VertexVec cache(cnt);
+	Vertex *__restrict pVert = &cache[0];
 
 	const double *__restrict px = in.memptr(), *__restrict py = px + cnt, *__restrict pz = py + cnt;
 	for (uint32_t i = 0; i < cnt; ++i)
@@ -36,10 +35,10 @@ static unique_ptr<Vertex[], decltype(deletor)> armaTOcache(const arma::mat in)
 
 	return cache;
 }
-static unique_ptr<Vertex[], decltype(deletor)> armaTOcache(const arma::mat in, const uint32_t *idx, const uint32_t cnt)
+static VertexVec armaTOcache(const arma::mat in, const uint32_t *idx, const uint32_t cnt)
 {
-	Vertex *__restrict pVert = (Vertex*)malloc_align(sizeof(Vertex) * cnt, 32);
-	unique_ptr<Vertex[], decltype(deletor)> cache(pVert, deletor);
+	VertexVec cache(cnt);
+	Vertex *__restrict pVert = &cache[0];
 
 	const double *__restrict px = in.memptr(), *__restrict py = in.memptr() + in.n_rows, *__restrict pz = in.memptr() + 2 * in.n_rows;
 	for (uint32_t i = 0; i < cnt; ++i)
@@ -108,18 +107,18 @@ public:
 struct PoseCostFunctorEx
 {
 private:
-	// Observations for a sample.
+	// this should be the firtst to declare in order to be initialized before other things
+	CShapePose *shapepose_;
 	const arma::mat shapeParam_;
 	const arColIS isValidNN_;
-	const unique_ptr<Vertex[], decltype(deletor)> scanCache;
-	vector<Vertex> basePts;
-	CShapePose *shapepose_;
+	const VertexVec scanCache;
+	const VertexVec basePts;
 
 public:
 	PoseCostFunctorEx(CShapePose *shapepose, const arma::mat shapeParam, const arColIS isValidNN, const cv::Mat idxNN, const arma::mat scanPoints)
-		: shapepose_(shapepose), shapeParam_(shapeParam), isValidNN_(isValidNN), scanCache(armaTOcache(scanPoints, idxNN.ptr<uint32_t>(), idxNN.rows))
+		: shapepose_(shapepose), shapeParam_(shapeParam), isValidNN_(isValidNN),
+		scanCache(armaTOcache(scanPoints, idxNN.ptr<uint32_t>(), idxNN.rows)), basePts(shapepose_->getBaseModel(shapeParam.memptr()))
 	{
-		basePts = shapepose_->getBaseModel(shapeParam_.memptr());
 	}
 	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose/*, const double * scale*/, double* residual) const
@@ -157,12 +156,12 @@ public:
 struct ShapeCostFunctorEx
 {
 private:
-	// Observations for a sample.
+	// this should be the firtst to declare in order to be initialized before other things
+	CShapePose *shapepose_;
 	const arma::mat poseParam_;
 	const arColIS isValidNN_;
 	const cv::Mat idxNN_;
-	const unique_ptr<Vertex[], decltype(deletor)> scanCache;
-	CShapePose *shapepose_;
+	const VertexVec scanCache;
 	double scale_;
 
 public:
@@ -308,13 +307,6 @@ public:
 };
 //===============================================================
 
-static bool yesORno(const char *str)
-{
-    printf("%s(y/n): ", str);
-    int key = getchar();
-    getchar();
-    return key == 'y';
-}
 static int inputNumber(const char *str)
 {
     printf("%s : ", str);
@@ -917,7 +909,7 @@ void fitMesh::mainProcess()
     loadModel();
     loadTemplate();
     rigidAlignTemplate2ScanPCA();
-    angleLimit = inputNumber("angle limit");
+	angleLimit = isVtune ? 30 : inputNumber("angle limit");
     fitModel();
 }
 void fitMesh::fitModel()
@@ -967,10 +959,11 @@ void fitMesh::fitShapePose()
     //showResult(false);
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
-    while(!viewer.wasStopped())
-    {
-        sleep(1);
-    }
+	if (!isVtune)
+	{
+		while (!viewer.wasStopped())
+			sleep(1);
+	}
 
 //        [poseParams, ~] = fmincon(@PoseFunc,poseParams,[],[],[],[],poseLB,poseUB,[],options);
 //        [pointsSM, ~] = shapepose(poseParams(1:end-1),shapeParams(1:end-1),evectors,modelDir);
@@ -1176,7 +1169,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 		t1 = getCurTime();
 
 		auto tpPoints = armaTOcache(pointsSM);
-		scanbody.nntree.search(tpPoints.get(), tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		scanbody.nntree.search(&tpPoints[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
 		printf("sse4NN uses %lld ms.\n", t2 - t1);
@@ -1251,7 +1244,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 			cnt = scanbody.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);
 			auto sc = armaTOcache(scanbody.points);
-			fwrite(sc.get(), sizeof(Vertex), cnt, fp);
+			fwrite(&sc[0], sizeof(Vertex), cnt, fp);
 		}
 		{
 			type = 0;
@@ -1261,7 +1254,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 			cnt = tempbody.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);
 			auto tp = armaTOcache(tempbody.points);
-			fwrite(tp.get(), sizeof(Vertex), cnt, fp);
+			fwrite(&tp[0], sizeof(Vertex), cnt, fp);
 		}
 		if (useFLANN)
 		{

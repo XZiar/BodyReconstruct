@@ -9,6 +9,7 @@ using std::endl;
 using std::string;
 using std::vector;
 using miniBLAS::Vertex;
+using miniBLAS::VertexVec;
 
 using EigenVec = vector<CMatrix<double> >;
 
@@ -102,7 +103,7 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	}
 	return 0;
 }
-vector<Vertex> CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
+VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
@@ -120,7 +121,7 @@ vector<Vertex> CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
 	return std::move(initMesh.vPoints);
 }
-vector<Vertex> CShapePose::getModelByPose(const vector<Vertex>& basePoints, const double *__restrict poseParamsIn)
+VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn)
 {
 	// Read object model
 	CMesh initMesh(initMesh_bk, &basePoints);
@@ -147,11 +148,11 @@ vector<Vertex> CShapePose::getModelByPose(const vector<Vertex>& basePoints, cons
 	initMesh.angleToMatrix(mRBM, TW, M);
 
 	// rotate joints
-	initMesh.rigidMotionSim(M, true);
+	initMesh.rigidMotionSim_AVX(M, true);
 
 	return std::move(initMesh.vPoints);
 }
-vector<Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
+VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
@@ -192,7 +193,7 @@ vector<Vertex> CShapePose::getModelFast(const double *__restrict shapeParamsIn, 
 	initMesh.angleToMatrix(mRBM, TW, M);
 
 	// rotate joints
-	initMesh.rigidMotionSim(M, true);
+	initMesh.rigidMotionSim_AVX(M, true);
 
 	return std::move(initMesh.vPoints);
 }

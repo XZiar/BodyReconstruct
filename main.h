@@ -27,3 +27,5 @@
 
 uint64_t getCurTime();
 uint64_t getCurTimeNS();
+bool yesORno(const char *str);
+extern bool isVtune;

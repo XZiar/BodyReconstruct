@@ -468,19 +468,6 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		aStream >> mPatch[i][2];
 	}
 
-	//prepare weightMatrix
-	{
-		using miniBLAS::Vertex;
-		uint32_t xgap = (mNumPoints + 3) / 4;
-		wgtMat.resize(xgap*mJointNumber);
-		theWgtMat = &wgtMat[0];
-		memset(&wgtMat[0], 0x0, xgap*mJointNumber * sizeof(Vertex));
-		const float *pWM = weightMatrix.data();
-		const uint32_t ept = 4 - (mNumPoints & 0x3);
-		for (uint32_t a = 0; a < mJointNumber; ++a)
-			memcpy(&wgtMat[a*xgap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
-	}
-
 	// set bounds
 	int count = 0;
 	mJointMap.setSize(mJointNumber + 1);
@@ -630,9 +617,21 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 
 void CMesh::prepareData()
 {
-	//prepare vPoints
 	using miniBLAS::Vertex;
-	vPoints.resize(mNumPoints + 3);//at lest multiply of 4
+	//prepare weightMatrix
+	{
+		wMatGap = ((mNumPoints + 7) / 4) & 0xfffffffe;
+		wgtMat.resize(wMatGap*mJointNumber);
+		theWgtMat = &wgtMat[0];
+		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
+		const float *pWM = weightMatrix.data();
+		const uint32_t ept = 4 - (mNumPoints & 0x3);
+		for (uint32_t a = 0; a < mJointNumber; ++a)
+			memcpy(&wgtMat[a*wMatGap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
+	}
+	//prepare vPoints & smooth
+	vPoints.resize(mNumPoints + 7);//at lest multiply of 8
+	memset(&vPoints[mNumPoints], 0x0, 7 * sizeof(Vertex));
 	ptSmooth.clear();
 	smtCnt.resize(mNumPoints);
 	for (uint32_t a = 0; a < mNumPoints; ++a)
@@ -640,6 +639,7 @@ void CMesh::prepareData()
 		uint8_t scnt = 0;
 		const float *ptr = mPoints[a].data();
 		vPoints[a].assign(ptr);
+		vPoints[a].w = 1;
 		for (uint32_t c = 0; c < mNumSmooth; c++)
 		{
 			const float weight = ptr[4 + 2 * c];
@@ -972,14 +972,14 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 		trans[2].assign(obj + 8);
 	}
 	// Apply motion to points
-	const __m128 mask = _mm_set1_ps(1);
+	//const __m128 mask = _mm_set1_ps(1);
 	if (!smooth || mNumSmooth == 1)
 	{
 		for (int i = 0; i < mNumPoints; i++)
 		{
 			//float *__restrict pSrc = mPoints[i].data();
 			const Vertex(&trans)[3] = Mvert[int(vPoints[i].w)];
-			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
+			const __m128 dat = vPoints[i];
 			const __m128 res = _mm_blend_ps
 			(
 				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
@@ -991,27 +991,269 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 	}
 	else
 	{
-		for (int i = 0, iSmt = 0; i < mNumPoints; i++)
+		const SmoothParam *pSP = thePtSmooth;
+		for (int i = 0; i < mNumPoints; i++)
 		{
-			const __m128 dat = _mm_blend_ps(vPoints[i], mask, 0b1000);
-			const Vertex(&trans)[3] = Mvert[thePtSmooth[iSmt].idx];
-			__m128 res = _mm_mul_ps(_mm_set1_ps(thePtSmooth[iSmt++].weight), _mm_blend_ps
+			const __m128 dat = vPoints[i];
+			switch (theSmtCnt[i])
+			{
+			case 0:
+			{
+				const Vertex(&trans)[3] = Mvert[pSP[0].idx];
+				vPoints[i].assign(_mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				break;
+			}
+			case 1:
+			{
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
+				const __m128 tmpA = _mm_mul_ps(_mm_set1_ps(pSP[0].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpB = _mm_mul_ps(_mm_set1_ps(pSP[1].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans1[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans1[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans1[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				vPoints[i].assign(_mm_add_ps(tmpA, tmpB));
+				break;
+			}
+			case 2:
+			{
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
+				const Vertex(&trans2)[3] = Mvert[pSP[2].idx];
+				const __m128 tmpA = _mm_mul_ps(_mm_set1_ps(pSP[0].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpB = _mm_mul_ps(_mm_set1_ps(pSP[1].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans1[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans1[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans1[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpC = _mm_mul_ps(_mm_set1_ps(pSP[2].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans2[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans2[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans2[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				vPoints[i].assign(_mm_add_ps(_mm_add_ps(tmpA, tmpB), tmpC));
+				break;
+			}
+			case 3:
+			{
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
+				const Vertex(&trans2)[3] = Mvert[pSP[2].idx];
+				const Vertex(&trans3)[3] = Mvert[pSP[3].idx];
+				const __m128 tmpA = _mm_mul_ps(_mm_set1_ps(pSP[0].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpB = _mm_mul_ps(_mm_set1_ps(pSP[1].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans1[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans1[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans1[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpC = _mm_mul_ps(_mm_set1_ps(pSP[2].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans2[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans2[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans2[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpD = _mm_mul_ps(_mm_set1_ps(pSP[3].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans3[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans3[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans3[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				vPoints[i].assign(_mm_add_ps(_mm_add_ps(tmpA, tmpB), _mm_add_ps(tmpC, tmpD)));
+				break;
+			}
+			case 4:
+			{
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
+				const Vertex(&trans2)[3] = Mvert[pSP[2].idx];
+				const Vertex(&trans3)[3] = Mvert[pSP[3].idx];
+				const Vertex(&trans4)[3] = Mvert[pSP[4].idx];
+				const __m128 tmpA = _mm_mul_ps(_mm_set1_ps(pSP[0].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpB = _mm_mul_ps(_mm_set1_ps(pSP[1].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans1[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans1[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans1[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpC = _mm_mul_ps(_mm_set1_ps(pSP[2].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans2[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans2[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans2[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpD = _mm_mul_ps(_mm_set1_ps(pSP[3].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans3[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans3[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans3[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				const __m128 tmpE = _mm_mul_ps(_mm_set1_ps(pSP[4].weight), _mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans4[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans4[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans4[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				vPoints[i].assign(_mm_add_ps(_mm_add_ps(_mm_add_ps(tmpA, tmpB), _mm_add_ps(tmpC, tmpD)), tmpE));
+				break;
+			}
+			default:
+				printf("more than 5.\n");
+				getchar();
+			}
+			pSP += 1 + theSmtCnt[i];
+		}
+	}
+	delete[] Mvert;
+}
+void CMesh::rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth)
+{
+	using miniBLAS::Vertex;
+	Vertex(*Mvert)[3] = new Vertex[M.size()][3];
+	for (uint32_t a = 0; a < M.size(); ++a)
+	{
+		Vertex(&trans)[3] = Mvert[a];
+		const auto* obj = M[a].data();
+		trans[0].assign(obj);
+		trans[1].assign(obj + 4);
+		trans[2].assign(obj + 8);
+	}
+	// Apply motion to points
+	//const __m128 mask = _mm_set1_ps(1);
+	if (!smooth || mNumSmooth == 1)
+	{
+		for (int i = 0; i < mNumPoints; i++)
+		{
+			//float *__restrict pSrc = mPoints[i].data();
+			const Vertex(&trans)[3] = Mvert[int(vPoints[i].w)];
+			const __m128 dat = vPoints[i];
+			const __m128 res = _mm_blend_ps
 			(
 				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-			)/*x,y,z,0*/);
-			for (uint8_t n = theSmtCnt[i]; n--; ++iSmt)
+				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/,
+				0b1010
+			);/*x,y,z,0*/
+			_mm_store_ps(vPoints[i], res);
+		}
+	}
+	else
+	{
+		const SmoothParam *pSP = thePtSmooth;
+		for (int i = 0; i < mNumPoints; i++)
+		{
+			switch (theSmtCnt[i])
 			{
-				const Vertex(&trans)[3] = Mvert[thePtSmooth[iSmt].idx];
-				res = _mm_add_ps(res,
-					_mm_mul_ps(_mm_set1_ps(thePtSmooth[iSmt].weight), _mm_blend_ps
-					(
-						_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-						_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-					)/*x,y,z,0*/)
-				);
+			case 0:
+			{
+				const __m128 dat = vPoints[i];
+				const Vertex(&trans)[3] = Mvert[pSP[0].idx];
+				vPoints[i].assign(_mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/);
+				break;
 			}
-			vPoints[i].assign(res);
+			case 1:
+			{
+				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
+				const Vertex(&trans1)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans2)[3] = Mvert[pSP[1].idx];
+				const __m256 tmp = _mm256_mul_ps
+				(
+					_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+					_mm256_blend_ps
+					(
+						_mm256_unpacklo_ps(
+							_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+							_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+					)/*x0,y0,z0,0;x1,y1,z1,0*/
+				);
+				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+				break;
+			}
+			case 2:
+			{
+				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
+				const __m128 dat = vPoints[i];
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
+				const Vertex(&trans1)[3] = Mvert[pSP[1].idx]; const Vertex(&trans2)[3] = Mvert[pSP[2].idx];
+				const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+				(
+					_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
+					_mm_blend_ps
+					(
+						_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+						_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+					)/*x,y,z,0*/
+				));
+				const __m256 tmpB = _mm256_mul_ps
+				(
+					_mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight))/*weight for two*/,
+					_mm256_blend_ps
+					(
+						_mm256_unpacklo_ps(
+							_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+							_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+					)/*x0,y0,z0,0;x1,y1,z1,0*/
+				);
+				const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+				break;
+			}
+			case 3:
+			case 4://just ignore the 5th
+			{
+				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
+				const Vertex(&trans0)[3] = Mvert[pSP[0].idx]; const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
+				const Vertex(&trans2)[3] = Mvert[pSP[2].idx]; const Vertex(&trans3)[3] = Mvert[pSP[3].idx];
+				const __m256 tmpA = _mm256_mul_ps
+				(
+					_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+					_mm256_blend_ps
+					(
+						_mm256_unpacklo_ps(
+							_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+							_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+					)/*x0,y0,z0,0;x1,y1,z1,0*/
+				);
+				const __m256 tmpB = _mm256_mul_ps
+				(
+					_mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight))/*weight for two*/,
+					_mm256_blend_ps
+					(
+						_mm256_unpacklo_ps(
+							_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
+							_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110001)/*y2,0,0,0;y3,0,0,0*/)/*x2,y2,0,0;x3,y3,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
+					)/*x2,y2,z2,0;x3,y3,z3,0*/
+				);
+				const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+				break;
+			}
+			default:
+				printf("more than 5.\n");
+				getchar();
+			}
+			pSP += 1 + theSmtCnt[i];
 		}
 	}
 	delete[] Mvert;
@@ -1265,13 +1507,14 @@ void CMesh::operator=(const CMesh& aMesh)
 	weightMatrix = aMesh.weightMatrix;
 
 	wgtMat = aMesh.wgtMat;
+	wMatGap = aMesh.wMatGap;
 	theWgtMat = &wgtMat[0];
 	vPoints = aMesh.vPoints;
 	ptSmooth = aMesh.ptSmooth;
 	thePtSmooth = &ptSmooth[0];
 }
 
-CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
+CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 {
 	using miniBLAS::Vertex;
 	isCopy = true;
@@ -1299,6 +1542,7 @@ CMesh::CMesh(const CMesh& from, const std::vector<miniBLAS::Vertex> *pointsIn)
 	mCurrentMotion = from.mCurrentMotion;
 
 	//avoid overhead of copying data unecessarily
+	wMatGap = from.wMatGap;
 	theWgtMat = from.theWgtMat;
 	thePtSmooth = from.thePtSmooth;
 	theSmtCnt = from.theSmtCnt;
@@ -1660,7 +1904,7 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
 		const __m128 add01 = _mm_add_ps
 		(
-			_mm_loadu_ps(vPoints[row])/*x,y,z,?*/,
+			_mm_load_ps(vPoints[row])/*x,y,z,?*/,
 			_mm_blend_ps(_mm_dp_ps(sp1, pEvec[0], 0b11110001)/*sx1,0,0,0*/, _mm_dp_ps(sp1, pEvec[5], 0b11110010)/*0,sy1,0,0*/, 0b10)/*sx1,sy1,0,0*/
 		);
 		const __m128 add23 = _mm_add_ps
@@ -1970,15 +2214,14 @@ void CMesh::updateJntPosEx()
 	delete[] wgtMin;
 	*/
 
-	const uint32_t xgap = (mNumPoints + 3) / 4;
 	for (uint32_t a = 0; a < 14; ++a)
 	{
 		//calc min
 		__m128 sumvec = _mm_setzero_ps(), sumPosA = _mm_setzero_ps(), sumPosB = _mm_setzero_ps();
-		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * xgap,
-			*__restrict vb = theWgtMat + idxmap[a][1] * xgap,
+		const Vertex *__restrict va = theWgtMat + idxmap[a][0] * wMatGap,
+			*__restrict vb = theWgtMat + idxmap[a][1] * wMatGap,
 			*__restrict pOri = &vPoints[0];
-		for (uint32_t b = xgap; b--; pOri += 4)
+		for (uint32_t b = wMatGap; b--; pOri += 4)
 		{
 			const __m128 wgt = _mm_min_ps(*va++, *vb++);
 			sumvec = _mm_add_ps(sumvec, wgt);
