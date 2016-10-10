@@ -646,16 +646,16 @@ void CMesh::prepareData()
 			if (weight > 10e-6)//take it
 			{
 				scnt++;
-				ptSmooth.push_back({ (uint32_t)ptr[3 + 2 * c], weight });
+				ptSmooth.push_back({ 3 * uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
 			}
 		}
 		if (scnt == 0)
 		{
-			smtCnt[a] = 0;
-			ptSmooth.push_back({ 1, 0 });
+			smtCnt[a] = 1;
+			ptSmooth.push_back({ 3, 0 });// this 0 weight will be ignore and considered weight 1 though
 		}
 		else
-			smtCnt[a] = scnt - 1;
+			smtCnt[a] = scnt;
 	}
 	theSmtCnt = &smtCnt[0];
 	thePtSmooth = &ptSmooth[0];
@@ -961,6 +961,9 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 }
 void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 {
+	printf("TODO: pSP has changed.\n");
+	getchar();
+	exit(-1);
 	using miniBLAS::Vertex;
 	Vertex(*Mvert)[3] = new Vertex[M.size()][3];
 	for (uint32_t a = 0; a < M.size(); ++a)
@@ -1123,138 +1126,111 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 void CMesh::rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth)
 {
 	using miniBLAS::Vertex;
-	Vertex(*Mvert)[3] = new Vertex[M.size()][3];
-	for (uint32_t a = 0; a < M.size(); ++a)
+	Vertex *Mvert = new Vertex[M.size() * 3];
 	{
-		Vertex(&trans)[3] = Mvert[a];
-		const auto* obj = M[a].data();
-		trans[0].assign(obj);
-		trans[1].assign(obj + 4);
-		trans[2].assign(obj + 8);
+		Vertex *PMV = Mvert;
+		for (uint32_t a = 0; a < M.size(); ++a, PMV += 3)
+		{
+			const auto* obj = M[a].data();
+			PMV[0].assign(obj);
+			PMV[1].assign(obj + 4);
+			PMV[2].assign(obj + 8);
+		}
 	}
 	// Apply motion to points
-	//const __m128 mask = _mm_set1_ps(1);
-	if (!smooth || mNumSmooth == 1)
+	const SmoothParam *__restrict pSP = thePtSmooth;
+	const uint32_t *__restrict pSC = theSmtCnt;
+	Vertex *__restrict pPt = &vPoints[0];
+	for (int i = mNumPoints; i--; pPt++)
 	{
-		for (int i = 0; i < mNumPoints; i++)
+		const uint32_t sc = *pSC++;
+		const __m128 dat = *pPt; const __m256 adat = _mm256_set_m128(dat, dat);
+		switch (sc)
 		{
-			//float *__restrict pSrc = mPoints[i].data();
-			const Vertex(&trans)[3] = Mvert[int(vPoints[i].w)];
-			const __m128 dat = vPoints[i];
-			const __m128 res = _mm_blend_ps
+		case 1:
+		{
+			const Vertex *trans = &Mvert[pSP[0].idx];
+			pPt->assign(_mm_blend_ps
 			(
 				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/,
-				0b1010
-			);/*x,y,z,0*/
-			_mm_store_ps(vPoints[i], res);
+				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+			)/*x,y,z,0*/);
+			break;
 		}
-	}
-	else
-	{
-		const SmoothParam *pSP = thePtSmooth;
-		for (int i = 0; i < mNumPoints; i++)
+		case 2:
 		{
-			switch (theSmtCnt[i])
-			{
-			case 0:
-			{
-				const __m128 dat = vPoints[i];
-				const Vertex(&trans)[3] = Mvert[pSP[0].idx];
-				vPoints[i].assign(_mm_blend_ps
+			const Vertex *trans0 = &Mvert[pSP[0].idx]; const Vertex *trans1 = &Mvert[pSP[1].idx];
+			const __m256 tmp = _mm256_mul_ps
+			(
+				_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+				_mm256_blend_ps
 				(
-					_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-					_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-				)/*x,y,z,0*/);
-				break;
-			}
-			case 1:
-			{
-				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
-				const Vertex(&trans1)[3] = Mvert[pSP[0].idx];
-				const Vertex(&trans2)[3] = Mvert[pSP[1].idx];
-				const __m256 tmp = _mm256_mul_ps
-				(
-					_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
-					_mm256_blend_ps
-					(
-						_mm256_unpacklo_ps(
-							_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-							_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-					)/*x0,y0,z0,0;x1,y1,z1,0*/
-				);
-				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-				break;
-			}
-			case 2:
-			{
-				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
-				const __m128 dat = vPoints[i];
-				const Vertex(&trans0)[3] = Mvert[pSP[0].idx];
-				const Vertex(&trans1)[3] = Mvert[pSP[1].idx]; const Vertex(&trans2)[3] = Mvert[pSP[2].idx];
-				const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
-				(
-					_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
-					_mm_blend_ps
-					(
-						_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-						_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
-					)/*x,y,z,0*/
-				));
-				const __m256 tmpB = _mm256_mul_ps
-				(
-					_mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight))/*weight for two*/,
-					_mm256_blend_ps
-					(
-						_mm256_unpacklo_ps(
-							_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-							_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-					)/*x0,y0,z0,0;x1,y1,z1,0*/
-				);
-				const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-				break;
-			}
-			case 3:
-			case 4://just ignore the 5th
-			{
-				const __m256 adat = _mm256_broadcast_ps((__m128*)&vPoints[i]);
-				const Vertex(&trans0)[3] = Mvert[pSP[0].idx]; const Vertex(&trans1)[3] = Mvert[pSP[1].idx];
-				const Vertex(&trans2)[3] = Mvert[pSP[2].idx]; const Vertex(&trans3)[3] = Mvert[pSP[3].idx];
-				const __m256 tmpA = _mm256_mul_ps
-				(
-					_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
-					_mm256_blend_ps
-					(
-						_mm256_unpacklo_ps(
-							_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-							_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-					)/*x0,y0,z0,0;x1,y1,z1,0*/
-				);
-				const __m256 tmpB = _mm256_mul_ps
-				(
-					_mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight))/*weight for two*/,
-					_mm256_blend_ps
-					(
-						_mm256_unpacklo_ps(
-							_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
-							_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110001)/*y2,0,0,0;y3,0,0,0*/)/*x2,y2,0,0;x3,y3,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
-					)/*x2,y2,z2,0;x3,y3,z3,0*/
-				);
-				const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-				vPoints[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-				break;
-			}
-			default:
-				printf("more than 5.\n");
-				getchar();
-			}
-			pSP += 1 + theSmtCnt[i];
+					_mm256_unpacklo_ps(
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
 		}
+		case 3:
+		{
+			const Vertex *trans0 = &Mvert[pSP[0].idx];
+			const Vertex *trans1 = &Mvert[pSP[1].idx]; const Vertex *trans2 = &Mvert[pSP[2].idx];
+			const __m256 wgt12 = _mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight));
+			const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+			(
+				_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
+				_mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/
+			));
+			const __m256 tmpB = _mm256_mul_ps
+			(wgt12, _mm256_blend_ps
+				(
+					_mm256_unpacklo_ps(
+						_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
+		}
+		default://just consider first 4
+		{
+			const Vertex *trans0 = &Mvert[pSP[0].idx]; const Vertex *trans1 = &Mvert[pSP[1].idx];
+			const __m256 wgt01 = _mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight));
+			const Vertex *trans2 = &Mvert[pSP[2].idx]; const Vertex *trans3 = &Mvert[pSP[3].idx];
+			const __m256 wgt23 = _mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight));
+			const __m256 tmpA = _mm256_mul_ps
+			(wgt01, _mm256_blend_ps
+				(
+					_mm256_unpacklo_ps(
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			const __m256 tmpB = _mm256_mul_ps
+			(wgt23, _mm256_blend_ps
+				(
+					_mm256_unpacklo_ps(
+						_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110001)/*y2,0,0,0;y3,0,0,0*/)/*x2,y2,0,0;x3,y3,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
+				)/*x2,y2,z2,0;x3,y3,z3,0*/
+			);
+			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
+		}
+		}
+		pSP += sc;
 	}
 	delete[] Mvert;
 }

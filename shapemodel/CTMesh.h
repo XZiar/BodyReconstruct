@@ -228,8 +228,8 @@ protected:
 		uint32_t idx;
 		float weight;
 	};
-	std::vector<uint8_t> smtCnt;
-	const uint8_t *theSmtCnt = nullptr;
+	std::vector<uint32_t> smtCnt;
+	const uint32_t *theSmtCnt = nullptr;
 	std::vector<SmoothParam> ptSmooth;
 	const SmoothParam *thePtSmooth = nullptr;
 	miniBLAS::VertexVec wgtMat;
