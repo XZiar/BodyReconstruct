@@ -1950,11 +1950,12 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 	const Vertex *__restrict pEvec = eigenVectorsIn;
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 15)
 	{
+		
 		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
 		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
 		_mm_prefetch(pEvec + 23, _MM_HINT_NTA);
 		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
-
+		
 		const __m256 addA = _mm256_add_ps
 		(
 			_mm256_blend_ps(

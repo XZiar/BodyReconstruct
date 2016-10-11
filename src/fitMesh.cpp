@@ -926,6 +926,7 @@ void fitMesh::fitShapePose()
     double eps_err = 1e-3;
     double errPrev = 0;
     double err=0;
+	uint32_t sumVNN;
 
 	cv::Mat pointscv = armaTOcv(scanbody.points);
 	if (false)
@@ -950,7 +951,7 @@ void fitMesh::fitShapePose()
         solveShape(idxsNN_,isValidNN_,tempbody.pose_params,tempbody.shape_params,scale);
         //solveShape_dlib();
 		cout << "========================================\n";
-		updatePoints(idxsNN_, isValidNN_, scale, err);
+		sumVNN = updatePoints(idxsNN_, isValidNN_, scale, err);
         showResult(false);
 		cout << tempbody.pose_params << endl;
 		cout << tempbody.shape_params << endl;
@@ -959,8 +960,17 @@ void fitMesh::fitShapePose()
     //showResult(false);
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
-	printf("POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
-	printf("SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	char tmp[1024];
+	sprintf(tmp, "\n\nPOSE : %d times, %f ms each.\nSHAPE: %d times, %f ms each.\nFinally valid nn: %d, total error: %f\n",
+		cSPose, tSPose / (cSPose * 1000), cSShape, tSShape / (cSShape * 1000), sumVNN, err);
+	printf(tmp);
+	report += tmp;
+	{
+		auto fname = std::to_string(getCurTime()) + ".log";
+		FILE *fp = fopen(fname.c_str(), "w");
+		fprintf(fp, report.c_str());
+		fclose(fp);
+	}
 	if (!isVtune)
 	{
 		while (!viewer.wasStopped())
@@ -1071,7 +1081,8 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
     Solver::Options options;
     options.minimizer_type = ceres::TRUST_REGION;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-    options.num_linear_solver_threads = 4;
+	options.num_threads = 2;
+    options.num_linear_solver_threads = 2;
     options.minimizer_progress_to_stdout = true;
     Solver::Summary summary;
     
@@ -1079,11 +1090,15 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
 	runcnt.store(0);
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
-
-    cout << summary.BriefReport() << "\n";
+	
+    cout << summary.BriefReport();
 	tSPose += runtime; cSPose += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
-	printf("poseCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
+	char tmp[512];
+	sprintf(tmp, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+	printf(tmp);
+	report += summary.FullReport();
+	report += tmp;
 }
 
 void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam,double &scale)
@@ -1113,7 +1128,8 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     Solver::Options options;
     options.minimizer_type = ceres::TRUST_REGION;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-    options.num_linear_solver_threads = 4;
+	options.num_threads = 2;
+	options.num_linear_solver_threads = 2;
     options.minimizer_progress_to_stdout = true;
     Solver::Summary summary;
 
@@ -1121,11 +1137,15 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 	runcnt.store(0);
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
-    cout << summary.BriefReport() << "\n";
-
+    
+	cout << summary.BriefReport();
 	tSShape += runtime; cSShape += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
-	printf("shapeCost invoked %d times, avg %f ms\n", rc, rt / (rc * 1000));
+	char tmp[512];
+	sprintf(tmp, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+	printf(tmp);
+	report += summary.FullReport();
+	report += tmp;
 
     cout<<"estimated shape params: ";
 	for (int i = 0; i < SHAPEPARAM_NUM; i++)
@@ -1135,7 +1155,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
 	printf("scale %f\n", scale);
 }
 
-void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
+uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
 	arma::mat pointsSM;
 
@@ -1184,7 +1204,7 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 	if (idxsNN.rows != tempbody.nPoints)
 	{
 		cout << "error of the result of knn search \n";
-		return;
+		return 0;
 	}
 
 	//get the normal of the 1-NN point in scan data
@@ -1213,12 +1233,12 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 	//    }
 	isValidNN = isValidNN % isVisible;
 	
+	uint32_t sumVNN = 0;
 	{
-		uint32_t sum = 0;
 		auto *pValid = isValidNN.memptr();
 		for (uint32_t a = 0; a++ < isValidNN.n_rows; ++pValid)
-			sum += *pValid;
-		printf("valid nn number is: %d\n", sum);
+			sumVNN += *pValid;
+		printf("valid nn number is: %d\n", sumVNN);
 	}
 	//    do not register open to closed hands
 	//    isValidNN(idxHand) = 0;
@@ -1301,6 +1321,8 @@ void fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &
 
 	idxsNN_rtn = idxsNN;
 	isValidNN_rtn = isValidNN;
+
+	return sumVNN;
 }
 void fitMesh::showResult(bool isNN=false)
 {

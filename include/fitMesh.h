@@ -74,6 +74,7 @@ public:
 	arColIS isValidNN_;
 	double tSPose = 0, tSShape = 0;
 	uint32_t cSPose = 0, cSShape = 0;
+	std::string report;
 
     CParams params;
     arma::mat evectors;//the eigen vetors of the body shape model
@@ -98,7 +99,7 @@ private:
 	void solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale);
 	//基于ceres求解
 	void solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
-	void updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
+	uint32_t updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
 	void solvePose_dlib();
 	void solveShape_dlib();
 
