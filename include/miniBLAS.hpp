@@ -29,6 +29,32 @@
 namespace miniBLAS
 {
 
+inline void MatrixTranspose4x4(const __m256 l1, const __m256 l2, __m256& o1, __m256& o2)
+{
+	const __m256 n1 = _mm256_permute_ps(l1, _MM_SHUFFLE(3, 1, 2, 0))/*x1,z1,y1,w1;x2,z2,y2,w2*/;
+	const __m256 n2 = _mm256_permute_ps(l2, _MM_SHUFFLE(3, 1, 2, 0))/*x3,z3,y3,w3;x4,z4,y4,w4*/;
+	const __m256 t1 = _mm256_unpacklo_ps(n1, n2)/*x1,x3,z1,z3;x2,x4,z2,z4*/;
+	const __m256 t2 = _mm256_unpackhi_ps(n1, n2)/*y1,y3,w1,w3;y2,y4,w2,w4*/;
+	const __m256 t3 = _mm256_permute2f128_ps(t1, t2, 0b00100000)/*x1,x3,z1,z3;y1,y3,w1,w3*/;
+	const __m256 t4 = _mm256_permute2f128_ps(t1, t2, 0b00110001)/*x2,x4,z2,z4;y2,y4,w2,w4*/;
+	o1 = _mm256_unpacklo_ps(t3, t4)/*x1,x2,x3,x4;y1,y2,y3,y4*/;
+	o2 = _mm256_unpackhi_ps(t3, t4)/*z1,z2,z3,z4lw1,w2,w3,w4*/;
+}
+
+inline __m128 cross_product(const __m128 a, const __m128 b)
+{
+	const __m128 t1 = _mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 0, 2, 1))/*y,z,x,w*/,
+		t2 = _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 1, 0, 2))/*v.z,v.x,v.y,v.w*/,
+		t3 = _mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 1, 0, 2))/*z,x,y,w*/,
+		t4 = _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 0, 2, 1))/*v.y,v.z,v.x,v.w*/;
+	return _mm_sub_ps(_mm_mul_ps(t1, t2), _mm_mul_ps(t3, t4));
+}
+
+inline __m128 Mat3x3_Mul_Vec3(const __m128 m0, const __m128 m1, const __m128 m2, const __m128 v)
+{
+	return _mm_blend_ps(_mm_blend_ps(_mm_dp_ps(m0, v, 0x77), _mm_dp_ps(m1, v, 0x77), 0b010), _mm_dp_ps(m2, v, 0x77), 0b100);
+}
+
 class ALIGN16 Vertex;
 class ALIGN16 VertexI;
 

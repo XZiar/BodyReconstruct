@@ -238,10 +238,10 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 		getchar();
 		exit(-1);
 	}
-	evecCache.resize(evectorsIn.n_elem / 4);
+	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
+	evecCache.resize(rows * 64);//15+1 vertex for a row
 	float *pVert = evecCache[0];
 	//20 * x(rows*3)
-	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
 	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
 	for (uint32_t a = 0; a < rows; ++a)
 	{
@@ -251,6 +251,7 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 			*pVert++ = *py++;
 		for (uint32_t b = 0; b < 20; ++b)
 			*pVert++ = *pz++;
+		pVert += 4;
 	}
 }
 

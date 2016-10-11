@@ -80,15 +80,62 @@ void CJoint::angleToMatrix(float aAngle, CMatrix<float>& M)
 			omegaT(i, j) = mDirection(i)*mDirection(j);
 	CMatrix<float> R(3, 3);
 	R = (omegaHat*(float)sin(aAngle)) + ((omegaHat*omegaHat)*(float)(1.0 - cos(aAngle)));
+
+	CVector<float> t = ((omegaT*mMoment)*aAngle) - R*(mDirection / mMoment);
+	//printf("t{3} = %f,%f,%f\n", t(0), t(1), t(2));
 	R(0, 0) += 1.0; R(1, 1) += 1.0; R(2, 2) += 1.0;
+	/*
 	CMatrix<float> T(R); T *= -1.0;
 	T(0, 0) += 1.0; T(1, 1) += 1.0; T(2, 2) += 1.0;
-	CVector<float> t(3);
-	t = T*(mDirection / mMoment) + ((omegaT*mMoment)*aAngle);
+	CVector<float> oldt = T*(mDirection / mMoment) + ((omegaT*mMoment)*aAngle);
+	*/
 	M.data()[0] = R.data()[0]; M.data()[1] = R.data()[1]; M.data()[2] = R.data()[2]; M.data()[3] = t(0);
 	M.data()[4] = R.data()[3]; M.data()[5] = R.data()[4]; M.data()[6] = R.data()[5]; M.data()[7] = t(1);
 	M.data()[8] = R.data()[6]; M.data()[9] = R.data()[7]; M.data()[10] = R.data()[8]; M.data()[11] = t(2);
 	M.data()[12] = 0.0;         M.data()[13] = 0.0;         M.data()[14] = 0.0;         M.data()[15] = 1.0;
+}
+// angleToMatrix
+void CJoint::angleToMatrixEx(const float aAngle, CMatrix<float>& M)
+{
+	using miniBLAS::Vertex;
+	const __m128 dir = _mm_loadu_ps(mDirection.data()), mmt = _mm_loadu_ps(mMoment.data());
+	const float dirX = mDirection(0), dirY = mDirection(1), dirZ = mDirection(2);
+	__m128
+		omegaHat0 = _mm_set_ps(0, dirY, -dirZ, 0),
+		omegaHat1 = _mm_set_ps(0, -dirX, 0, dirZ),
+		omegaHat2 = _mm_set_ps(0, 0, dirX, -dirY),
+		/*omegaT(i, j) = mDirection(i)*mDirection(j)*/
+		omegaT0 = _mm_mul_ps(dir, _mm_permute_ps(dir, _MM_SHUFFLE(0, 0, 0, 0))),
+		omegaT1 = _mm_mul_ps(dir, _mm_permute_ps(dir, _MM_SHUFFLE(1, 1, 1, 1))),
+		omegaT2 = _mm_mul_ps(dir, _mm_permute_ps(dir, _MM_SHUFFLE(2, 2, 2, 2)));
+
+	const __m128 oh00 = _mm_dp_ps(omegaHat0, omegaHat0, 0x77), oh01 = _mm_dp_ps(omegaHat0, omegaHat1, 0x77), oh02 = _mm_dp_ps(omegaHat0, omegaHat2, 0x77),
+		oh11 = _mm_dp_ps(omegaHat1, omegaHat1, 0x77), oh12 = _mm_dp_ps(omegaHat1, omegaHat2, 0x77), oh22 = _mm_dp_ps(omegaHat2, omegaHat2, 0x77);
+	const __m128 RB0 = _mm_blend_ps(_mm_blend_ps(oh00, oh01, 0b010), oh02, 0b100),
+		RB1 = _mm_blend_ps(_mm_blend_ps(oh01, oh11, 0b010), oh12, 0b100),
+		RB2 = _mm_blend_ps(_mm_blend_ps(oh02, oh12, 0b010), oh22, 0b100);
+
+	/*R = (omegaHat*(float)sin(aAngle)) + ((omegaHat*omegaHat)*(float)(1.0 - cos(aAngle)));*/
+	const __m128 sin4 = _mm_set_ps1(std::sin(aAngle)), cos4 = _mm_set_ps1(1.0f - std::cos(aAngle));
+	__m128 R0 = _mm_sub_ps(_mm_mul_ps(omegaHat0, sin4), _mm_mul_ps(RB0, cos4));
+	__m128 R1 = _mm_sub_ps(_mm_mul_ps(omegaHat1, sin4), _mm_mul_ps(RB1, cos4));
+	__m128 R2 = _mm_sub_ps(_mm_mul_ps(omegaHat2, sin4), _mm_mul_ps(RB2, cos4));
+
+	/*t = T*(mDirection / mMoment) + ((omegaT*mMoment)*aAngle);*/
+	const __m128 dm = miniBLAS::cross_product(dir, mmt);
+	__m128 t = miniBLAS::Mat3x3_Mul_Vec3(R0, R1, R2, dm),
+		tB = miniBLAS::Mat3x3_Mul_Vec3(omegaT0, omegaT1, omegaT2, mmt);
+	t = _mm_sub_ps(_mm_mul_ps(tB, _mm_set_ps1(aAngle)), t);
+	//showfloat4("t{3}", &t);
+
+	const static __m128 ones = _mm_set_ps1(1);
+	R0 = _mm_add_ps(R0, _mm_insert_ps(ones, t, 0b00110110)/*1,0,0,tx*/);
+	R1 = _mm_add_ps(R1, _mm_insert_ps(ones, t, 0b01110101)/*0,1,0,tx*/);
+	R2 = _mm_add_ps(R2, _mm_insert_ps(ones, t, 0b10110011)/*0,0,1,tx*/);
+	_mm_storeu_ps(M.data(), R0);
+	_mm_storeu_ps(M.data() + 4, R1);
+	_mm_storeu_ps(M.data() + 8, R2);
+	_mm_storeu_ps(M.data() + 12, _mm_set_ps(1, 0, 0, 0));
 }
 
 // operator =
@@ -1414,12 +1461,17 @@ void CMesh::makeSmooth(CMesh* initMesh, bool dual)
 	}
 }
 
+static void printM4x4(const char * name, const float *ptr)
+{
+	printf("%s : \n", name);
+	for (uint32_t a = 0; a < 16;a += 4)
+		printf("\t%f,%f,%f,%f\n", ptr[a], ptr[a + 1], ptr[a + 2], ptr[a + 3]);
+}
+
 // angleToMatrix
 void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M)
 {
-
 	// Determine motion of parts behind joints
-
 	for (int i = 1; i <= mJointNumber; i++)
 	{
 		M(i).setSize(4, 4); M(i) = 0;
@@ -1432,7 +1484,11 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 	{
 		int i = jIds[ii - 1];
 		CMatrix<float> Mi(4, 4);
-		mJoint(i).angleToMatrix(aJAngles(i + 5), Mi); // i-1
+		mJoint(i).angleToMatrixEx(aJAngles(i + 5), Mi); // i-1
+		//printM4x4("avx version", Mi.data());
+		//mJoint(i).angleToMatrix(aJAngles(i + 5), Mi); // i-1
+		//printM4x4("ori version", Mi.data());
+		//getchar();
 		for (int jj = 1; jj <= mJointNumber; jj++)
 		{
 			int j = jIds[jj - 1];
@@ -1904,12 +1960,12 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
 	const Vertex *__restrict pEvec = eigenVectorsIn;
-	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 15)
+	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
-		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 23, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 16, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 20, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 24, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 28, _MM_HINT_NTA);
 		const __m128 add01 = _mm_add_ps
 		(
 			_mm_load_ps(vPoints[row])/*x,y,z,?*/,
@@ -1948,13 +2004,13 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp23 = _mm256_permute2f128_ps(sp12, sp34, 0b00100001);
 	const __m256 sp51 = _mm256_set_m128(shapeParamsIn[0], sp5), sp45 = _mm256_set_m128(sp5, shapeParamsIn[3]);
 	const Vertex *__restrict pEvec = eigenVectorsIn;
-	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 15)
+	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		
-		_mm_prefetch(pEvec + 15, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 19, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 23, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 27, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 16, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 20, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 24, _MM_HINT_NTA);
+		_mm_prefetch(pEvec + 28, _MM_HINT_NTA);
 		
 		const __m256 addA = _mm256_add_ps
 		(

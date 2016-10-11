@@ -49,6 +49,7 @@ public:
 	void rigidMotion(CMatrix<float>& M);
 	// Constructs the motion matrix from the joint axis and the rotation angle
 	void angleToMatrix(float aAngle, CMatrix<float>& M);
+	void angleToMatrixEx(const float aAngle, CMatrix<float>& M);
 	// Access to joint's position and axis
 	inline void set(CVector<float>& aDirection, CVector<float>& aPoint) { mDirection = aDirection; mPoint = aPoint; mMoment = aPoint / aDirection; };
 	inline void setDirection(CVector<float>& aDirection) { mDirection = aDirection; mMoment = mPoint / aDirection; };
