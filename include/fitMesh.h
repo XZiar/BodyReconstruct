@@ -8,7 +8,7 @@
 
 #include "kdNNTree.h"
 
-#include <dlib/optimization.h>
+//#include <dlib/optimization.h>
 
 #define POSPARAM_NUM 31
 #define SHAPEPARAM_NUM 20
@@ -111,8 +111,8 @@ public:
 	void mainProcess();
 	arma::mat test();
 	void showResult(bool isNN);
-	static double posecost_dlib(dlib::matrix<double, POSPARAM_NUM, 1> pose);
-	static double shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape);
+	//static double posecost_dlib(dlib::matrix<double, POSPARAM_NUM, 1> pose);
+	//static double shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape);
 };
 
 #endif // FITMESH_H

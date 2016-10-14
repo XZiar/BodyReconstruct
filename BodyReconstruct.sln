@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstruct", "BodyReco
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstructHelper", "..\BodyReconstructHelper\BodyReconstructHelper.vcxproj", "{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstructWin", "BodyReconstructWin.vcxproj", "{6ABCF070-DCE8-4F17-A201-CA765B024C03}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -27,6 +29,12 @@ Global
 		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x64.ActiveCfg = Release|x64
 		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x64.Build.0 = Release|x64
 		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x86.ActiveCfg = Release|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x64.ActiveCfg = Debug|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x64.Build.0 = Debug|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x86.ActiveCfg = Debug|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x64.ActiveCfg = Release|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x64.Build.0 = Release|x64
+		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

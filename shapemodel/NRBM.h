@@ -23,6 +23,7 @@
 #include "CVector.h"
 #include "CMatrix.h"
 #include <vector>
+#include <algorithm>
 
 namespace NRBM {
   // Transforms a rigid body motion in matrix representation to a twist representation

@@ -1878,7 +1878,8 @@ std::vector<CMatrix<double> > CMesh::readShapeSpaceEigens(std::string fileName, 
 	ifstream loadFile;
 	loadFile.open(path.c_str());
 	//reading only first four columns here
-	char fullLine[10000], c[numEigenVectors][500];
+	char fullLine[10000];
+	char(*c)[500] = new char[numEigenVectors][500];
 	std::vector<CMatrix<double> > eigenVectors(numEigenVectors);
 	for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
 	{
@@ -1915,6 +1916,7 @@ std::vector<CMatrix<double> > CMesh::readShapeSpaceEigens(std::string fileName, 
 		totalLines++;
 	}
 	loadFile.close();
+	delete[] c;
 	return eigenVectors;
 }
 

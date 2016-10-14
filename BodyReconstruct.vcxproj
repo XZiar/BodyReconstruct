@@ -20,7 +20,7 @@
     <ClCompile Include="shapemodel\Show.cpp" />
     <ClCompile Include="src\fitMesh.cpp" />
     <ClCompile Include="src\tools.cpp" />
-    <ClCompile Include="Y:\BodyReconstruct\src\kdNNTree.cpp" />
+    <ClCompile Include="src\kdNNTree.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\fitMesh.h" />
@@ -31,7 +31,7 @@
     <ClInclude Include="shapemodel\cshapepose.h" />
     <ClInclude Include="shapemodel\CTMesh.h" />
     <ClInclude Include="shapemodel\CVector.h" />
-    <ClInclude Include="Y:\BodyReconstruct\include\kdNNTree.h" />
+    <ClInclude Include="include\kdNNTree.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="BodyReconstruct.pro" />

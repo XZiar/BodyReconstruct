@@ -48,7 +48,7 @@
     <ClCompile Include="shapemodel\Show.cpp">
       <Filter>source files\shapemodel</Filter>
     </ClCompile>
-    <ClCompile Include="Y:\BodyReconstruct\src\kdNNTree.cpp">
+    <ClCompile Include="src\kdNNTree.cpp">
       <Filter>source files\src</Filter>
     </ClCompile>
   </ItemGroup>
@@ -65,20 +65,20 @@
     <ClInclude Include="main.h">
       <Filter>header files</Filter>
     </ClInclude>
-    <ClInclude Include="Y:\BodyReconstruct\include\kdNNTree.h">
+    <ClInclude Include="include\kdNNTree.h">
       <Filter>header files\include</Filter>
     </ClInclude>
     <ClInclude Include="include\miniBLAS.hpp">
       <Filter>header files\include</Filter>
     </ClInclude>
     <ClInclude Include="shapemodel\CMatrix.h">
-      <Filter>header files\include</Filter>
+      <Filter>header files\shapemodel</Filter>
     </ClInclude>
     <ClInclude Include="shapemodel\CTMesh.h">
-      <Filter>header files\include</Filter>
+      <Filter>header files\shapemodel</Filter>
     </ClInclude>
     <ClInclude Include="shapemodel\CVector.h">
-      <Filter>header files\include</Filter>
+      <Filter>header files\shapemodel</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
