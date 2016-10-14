@@ -974,7 +974,7 @@ void fitMesh::fitShapePose()
 	if (!isVtune)
 	{
 		while (!viewer.wasStopped())
-			sleep(1);
+			sleepMS(1000);
 	}
 
 //        [poseParams, ~] = fmincon(@PoseFunc,poseParams,[],[],[],[],poseLB,poseUB,[],options);
@@ -1081,6 +1081,7 @@ void fitMesh::solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::ma
     Solver::Options options;
     options.minimizer_type = ceres::TRUST_REGION;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+	options.linear_solver_type = ceres::DENSE_QR;
 	options.num_threads = 2;
     options.num_linear_solver_threads = 2;
     options.minimizer_progress_to_stdout = true;
@@ -1128,6 +1129,7 @@ void fitMesh::solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const a
     Solver::Options options;
     options.minimizer_type = ceres::TRUST_REGION;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+	options.linear_solver_type = ceres::DENSE_QR;
 	options.num_threads = 2;
 	options.num_linear_solver_threads = 2;
     options.minimizer_progress_to_stdout = true;
@@ -1372,7 +1374,7 @@ void fitMesh::showResult(bool isNN=false)
     //    cout<<"close the window to continue"<<endl;
     //    while(!viewer.wasStopped())
     //    {
-    //        sleep(1);
+    //        sleepMS(1000);
     //    }
     }
     else
@@ -1410,7 +1412,7 @@ void fitMesh::showResult(bool isNN=false)
         //    cout<<"close the window to continue"<<endl;
         //    while(!viewer.wasStopped())
         //    {
-        //        sleep(1);
+        //        sleepMS(1000);
         //    }
     }
 }

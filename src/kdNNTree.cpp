@@ -6,15 +6,14 @@ using std::vector;
 
 void kdNNTree::init(const arma::mat& points)
 {
-	const uint32_t cnt = points.n_rows;
 	for (auto& t : tree)
 	{
 		t.clear();
-		t.reserve(cnt / 8);
+		t.reserve(points.n_rows / 8);
 	}
 	
-	const double *__restrict px = points.memptr(), *__restrict py = px + cnt, *__restrict pz = py + cnt;
-	for (uint32_t i = 0; i < cnt; ++i)
+	const double *__restrict px = points.memptr(), *__restrict py = px + points.n_rows, *__restrict pz = py + points.n_rows;
+	for (uint32_t i = 0; i < points.n_rows; ++i)
 	{
 		const Vertex v(*px++, *py++, *pz++, (int32_t)i);
 		tree[judgeIdx(v)].push_back(v);
@@ -82,7 +81,7 @@ void kdNNTree::searchOld(const Vertex* pVert, const uint32_t count, int *__restr
 			const __m128 vb4 = pBase[3], a4 = _mm_sub_ps(mObj, vb4);
 
 			//prefetch
-			_mm_prefetch(pBase += 4, _MM_HINT_T1);
+			_mm_prefetch((const char*)(pBase += 4), _MM_HINT_T1);
 
 			//make up vector contain 4 dist data(dist^2)
 			__m128 this4 = _mm_blend_ps
@@ -175,7 +174,7 @@ void kdNNTree::search(const Vertex* pVert, const uint32_t count, int *__restrict
 			const __m128 vb4 = pBase[3], a4 = _mm_sub_ps(mObj, vb4);
 
 			//prefetch
-			_mm_prefetch(pBase += 4, _MM_HINT_T1);
+			_mm_prefetch((const char*)(pBase += 4), _MM_HINT_T1);
 
 			//make up vector contain 4 dist data(dist^2)
 			__m128 this4 = _mm_blend_ps

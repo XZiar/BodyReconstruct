@@ -11,9 +11,9 @@
 #include <vector>
 #include <memory>
 #include <time.h>
-#include <sys/time.h>
 #include <chrono>
 #include <atomic>
+#include <thread>
 
 #include <armadillo>
 #include <opencv2/core/core.hpp>
@@ -27,5 +27,6 @@
 
 uint64_t getCurTime();
 uint64_t getCurTimeNS();
+void sleepMS(uint32_t ms);
 bool yesORno(const char *str);
 extern bool isVtune;

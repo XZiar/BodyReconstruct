@@ -10,6 +10,10 @@ uint64_t getCurTimeNS()
 {
 	return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 }
+void sleepMS(uint32_t ms)
+{
+	std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
 bool yesORno(const char *str)
 {
 	if (isVtune)

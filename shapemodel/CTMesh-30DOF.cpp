@@ -1962,10 +1962,10 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	const Vertex *__restrict pEvec = eigenVectorsIn;
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
-		_mm_prefetch(pEvec + 16, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 20, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 24, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 28, _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
 		const __m128 add01 = _mm_add_ps
 		(
 			_mm_load_ps(vPoints[row])/*x,y,z,?*/,
@@ -2007,10 +2007,10 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		
-		_mm_prefetch(pEvec + 16, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 20, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 24, _MM_HINT_NTA);
-		_mm_prefetch(pEvec + 28, _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
 		
 		const __m256 addA = _mm256_add_ps
 		(
