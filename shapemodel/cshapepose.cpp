@@ -10,6 +10,7 @@ using std::string;
 using std::vector;
 using miniBLAS::Vertex;
 using miniBLAS::VertexVec;
+using miniBLAS::SQMat4x4;
 
 using EigenVec = vector<CMatrix<double> >;
 
@@ -139,16 +140,29 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<CMatrix<float> > M(initMesh.joints() + 1);
 	CVector<float> TW(initMesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
-	initMesh.angleToMatrix(mRBM, TW, M);
 
+	SQMat4x4 newM[26];
+	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	//CVector<CMatrix<float> > M(initMesh.joints() + 1);
+	//initMesh.angleToMatrix(mRBM, TW, M);
+	/*
+		for (uint32_t a = 0; a < 26; ++a)
+		{
+			printf("matrix %d\n", a);
+			for (uint32_t b = 0; b < 4; ++b)
+			{
+				float *nM = (float*)&newM[a][b], *oM = M[a].data() + b * 4;
+				printf("new: %e,%e,%e,%e \t\told: %e,%e,%e,%e\n", nM[0], nM[1], nM[2], nM[3], oM[0], oM[1], oM[2], oM[3]);
+			}
+		}
+	*/
 	// rotate joints
-	initMesh.rigidMotionSim_AVX(M, true);
+	initMesh.rigidMotionSim_AVX(newM, true);
 
 	return std::move(initMesh.vPoints);
 }
@@ -188,16 +202,19 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<CMatrix<float> > M(initMesh.joints() + 1);
 	CVector<float> TW(initMesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
+	/*
+	CVector<CMatrix<float> > M(initMesh.joints() + 1);
 	initMesh.angleToMatrix(mRBM, TW, M);
-
+	*/
+	SQMat4x4 newM[26];
+	initMesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints
-	initMesh.rigidMotionSim_AVX(M, true);
+	initMesh.rigidMotionSim_AVX(newM, true);
 
 	return std::move(initMesh.vPoints);
 }

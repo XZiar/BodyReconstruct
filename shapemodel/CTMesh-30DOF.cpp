@@ -94,7 +94,6 @@ void CJoint::angleToMatrix(float aAngle, CMatrix<float>& M)
 	M.data()[8] = R.data()[6]; M.data()[9] = R.data()[7]; M.data()[10] = R.data()[8]; M.data()[11] = t(2);
 	M.data()[12] = 0.0;         M.data()[13] = 0.0;         M.data()[14] = 0.0;         M.data()[15] = 1.0;
 }
-// angleToMatrix
 void CJoint::angleToMatrixEx(const float aAngle, CMatrix<float>& M)
 {
 	using miniBLAS::Vertex;
@@ -137,14 +136,65 @@ void CJoint::angleToMatrixEx(const float aAngle, CMatrix<float>& M)
 	_mm_storeu_ps(M.data() + 8, R2);
 	_mm_storeu_ps(M.data() + 12, _mm_set_ps(1, 0, 0, 0));
 }
+miniBLAS::SQMat4x4 CJoint::angleToMatrixEx(const float aAngle)
+{
+	using miniBLAS::Vertex;
+	using miniBLAS::SQMat3x3;
+	using miniBLAS::SQMat4x4;
+	const float dirX = mDirection(0), dirY = mDirection(1), dirZ = mDirection(2);
+	__m128 /*omegaT(i, j) = mDirection(i)*mDirection(j)*/
+		omegaT0 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(0, 0, 0, 0))),
+		omegaT1 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(1, 1, 1, 1))),
+		omegaT2 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(2, 2, 2, 2)));
+	const SQMat3x3 omegaHat(_mm_set_ps(0, dirY, -dirZ, 0), _mm_set_ps(0, -dirX, 0, dirZ), _mm_set_ps(0, 0, dirX, -dirY));
+
+
+	const __m128 oh00 = _mm_dp_ps(omegaHat[0], omegaHat[0], 0x77), oh01 = _mm_dp_ps(omegaHat[0], omegaHat[1], 0x77),
+		oh02 = _mm_dp_ps(omegaHat[0], omegaHat[2], 0x77), oh11 = _mm_dp_ps(omegaHat[1], omegaHat[1], 0x77),
+		oh12 = _mm_dp_ps(omegaHat[1], omegaHat[2], 0x77), oh22 = _mm_dp_ps(omegaHat[2], omegaHat[2], 0x77);
+	SQMat3x3 RB(_mm_blend_ps(_mm_blend_ps(oh00, oh01, 0b010), oh02, 0b100),
+		_mm_blend_ps(_mm_blend_ps(oh01, oh11, 0b010), oh12, 0b100),
+		_mm_blend_ps(_mm_blend_ps(oh02, oh12, 0b010), oh22, 0b100));
+
+	/*R = (omegaHat*(float)sin(aAngle)) + ((omegaHat*omegaHat)*(float)(1.0 - cos(aAngle)));*/
+	const SQMat3x3 R = omegaHat*std::sin(aAngle) - RB*(1.0f - std::cos(aAngle));
+	
+	/*t = T*(mDirection / mMoment) + ((omegaT*mMoment)*aAngle);*/
+	//const __m256 t2 = miniBLAS::Mat3x3_Mul2_Vec3(omegaT0, omegaT1, omegaT2, vMom, R[0], R[1], R[2], vDM)/*om;R*/;
+	//__m128 t = _mm_sub_ps(
+	//	_mm_mul_ps(_mm256_castps256_ps128(t2)/*om*/, _mm_set_ps1(aAngle)),
+	//	_mm256_extractf128_ps(t2, 1));
+	__m128 t = miniBLAS::Mat3x3_Mul_Vec3(R[0], R[1], R[2], vDM),
+		tB = miniBLAS::Mat3x3_Mul_Vec3(omegaT0, omegaT1, omegaT2, vMom);
+	t = _mm_sub_ps(_mm_mul_ps(tB, _mm_set_ps1(aAngle)), t);
+	/*
+	{
+		printf("R---compare-R\n");
+		const float *oR = (float*)&R0, *nR = (float*)&R[0];
+		printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+		oR = (float*)&R1, nR = (float*)&R[1];
+		printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+		oR = (float*)&R2, nR = (float*)&R[2];
+		printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+	}*/
+
+	const static __m128 ones = _mm_set_ps1(1);
+	SQMat4x4 M = R + SQMat4x4(true);
+	M[0] = _mm_insert_ps(M[0], t, 0b00110000)/*x,y,z,tx*/;
+	M[1] = _mm_insert_ps(M[1], t, 0b01110000)/*x,y,z,ty*/;
+	M[2] = _mm_insert_ps(M[2], t, 0b10110000)/*x,y,z,tz*/;
+	M[3] = _mm_set_ps(1, 0, 0, 0);
+	return M;
+}
 
 // operator =
 CJoint& CJoint::operator=(CJoint& aCopyFrom)
 {
-	mDirection = aCopyFrom.mDirection;
-	mPoint = aCopyFrom.mPoint;
-	mMoment = aCopyFrom.mMoment;
+	mDirection = aCopyFrom.mDirection; vDir = aCopyFrom.vDir;
+	mPoint = aCopyFrom.mPoint; vPoint = aCopyFrom.vPoint;
+	mMoment = aCopyFrom.mMoment; vMom = aCopyFrom.vMom;
 	mParent = aCopyFrom.mParent;
+	vDM = vDM;
 	return *this;
 }
 
@@ -722,13 +772,13 @@ void CMesh::prepareData()
 			if (weight > 10e-6)//take it
 			{
 				scnt++;
-				ptSmooth.push_back({ 3 * uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
+				ptSmooth.push_back({ uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
 			}
 		}
 		if (scnt == 0)
 		{
 			smtCnt[a] = 1;
-			ptSmooth.push_back({ 3, 0 });// this 0 weight will be ignore and considered weight 1 though
+			ptSmooth.push_back({ 4, 0 });// this 0 weight will be ignore and considered weight 1 though
 		}
 		else
 			smtCnt[a] = scnt;
@@ -1201,6 +1251,9 @@ void CMesh::rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth)
 }
 void CMesh::rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth)
 {
+	printf("TODO: pSP has changed.\n");
+	getchar();
+	exit(-1);
 	using miniBLAS::Vertex;
 	Vertex *Mvert = new Vertex[M.size() * 3];
 	{
@@ -1309,6 +1362,105 @@ void CMesh::rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smo
 		pSP += sc;
 	}
 	delete[] Mvert;
+}
+void CMesh::rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
+{
+	using miniBLAS::Vertex;
+	// Apply motion to points
+	const SmoothParam *__restrict pSP = thePtSmooth;
+	const uint32_t *__restrict pSC = theSmtCnt;
+	Vertex *__restrict pPt = &vPoints[0];
+	for (int i = mNumPoints; i--; pPt++)
+	{
+		const uint32_t sc = *pSC++;
+		const __m128 dat = *pPt; const __m256 adat = _mm256_set_m128(dat, dat);
+		switch (sc)
+		{
+		case 1:
+		{
+			const __m128 *trans = &M[pSP[0].idx][0];
+			pPt->assign(_mm_blend_ps
+			(
+				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+			)/*x,y,z,0*/);
+			break;
+		}
+		case 2:
+		{
+			const __m128 *trans0 = &M[pSP[0].idx][0]; const __m128 *trans1 = &M[pSP[1].idx][0];
+			const __m256 tmp = _mm256_mul_ps
+			(
+				_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+				_mm256_blend_ps
+				(
+					_mm256_unpacklo_ps(
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
+		}
+		case 3:
+		{
+			const __m128 *trans0 = &M[pSP[0].idx][0]; 
+			const __m128 *trans1 = &M[pSP[1].idx][0]; const __m128 *trans2 = &M[pSP[2].idx][0];
+			const __m256 wgt12 = _mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight));
+			const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+			(
+				_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
+				_mm_blend_ps
+				(
+					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
+				)/*x,y,z,0*/
+			));
+			const __m256 tmpB = _mm256_mul_ps
+			(wgt12, _mm256_blend_ps
+			(
+				_mm256_unpacklo_ps(
+					_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+				_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
+		}
+		default://just consider first 4
+		{
+			const __m128 *trans0 = &M[pSP[0].idx][0]; const __m128 *trans1 = &M[pSP[1].idx][0];
+			const __m256 wgt01 = _mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight));
+			const __m128 *trans2 = &M[pSP[2].idx][0]; const __m128 *trans3 = &M[pSP[3].idx][0];
+			const __m256 wgt23 = _mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight));
+			const __m256 tmpA = _mm256_mul_ps
+			(wgt01, _mm256_blend_ps
+			(
+				_mm256_unpacklo_ps(
+					_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110001)/*y0,0,0,0;y1,0,0,0*/)/*x0,y0,0,0;x1,y1,0,0*/,
+				_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+			);
+			const __m256 tmpB = _mm256_mul_ps
+			(wgt23, _mm256_blend_ps
+			(
+				_mm256_unpacklo_ps(
+					_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
+					_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110001)/*y2,0,0,0;y3,0,0,0*/)/*x2,y2,0,0;x3,y3,0,0*/,
+				_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
+			)/*x2,y2,z2,0;x3,y3,z3,0*/
+			);
+			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
+			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			break;
+		}
+		}
+		pSP += sc;
+	}
 }
 void CMesh::rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth, const bool force)
 {
@@ -1500,6 +1652,45 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 	for (int i = 1; i <= mJointNumber; i++)
 		M(i) = aRBM*M(i);
 	M(0) = aRBM;
+}
+void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJAngles, miniBLAS::SQMat4x4(&M)[26])
+{
+	using miniBLAS::Vertex;
+	using miniBLAS::SQMat4x4;
+
+	for (auto& ele : M)
+		ele = SQMat4x4(true);
+	// Determine motion of parts behind joints
+	uint32_t ids[] = { 1,24,2,3,4,5,23,6,7,8,9,10,25,11,12,13,14,15,16,17,18,19,20,21,22 };
+
+	// Leonid
+	for (int ii = mJointNumber; ii--;)
+	{
+		uint32_t id = ids[ii];
+		auto Mi = mJoint(id).angleToMatrixEx(aJAngles(id + 5));
+		CMatrix<float> oMi(4, 4);
+		mJoint(id).angleToMatrixEx(aJAngles(id + 5), oMi); // i-1
+		/*
+		printf("joint matrix %d\n", id);
+		for (uint32_t b = 0; b < 4; ++b)
+		{
+			Vertex nM(Mi[b]), oM;
+			oM.assign(oMi.data() + b * 4);
+			printf("new: %e,%e,%e,%e \t\told: %e,%e,%e,%e\n", nM.x, nM.y, nM.z, nM.w, oM.x, oM.y, oM.z, oM.w);
+		}
+		*/
+
+		for (int jj = 0; jj < mJointNumber; jj++)
+		{
+			uint32_t jid = ids[jj];
+			if (mInfluencedBy(jid, id))
+				M[jid] = Mi * M[jid];
+		}
+	}
+
+	M[0].assign(aRBM.data());
+	for (int i = 1; i <= mJointNumber; i++)
+		M[i] = M[0] * M[i];
 }
 
 void CMesh::invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M)

@@ -50,11 +50,25 @@ public:
 	// Constructs the motion matrix from the joint axis and the rotation angle
 	void angleToMatrix(float aAngle, CMatrix<float>& M);
 	void angleToMatrixEx(const float aAngle, CMatrix<float>& M);
+	miniBLAS::SQMat4x4 angleToMatrixEx(const float aAngle);
 	// Access to joint's position and axis
-	inline void set(CVector<float>& aDirection, CVector<float>& aPoint) { mDirection = aDirection; mPoint = aPoint; mMoment = aPoint / aDirection; };
-	inline void setDirection(CVector<float>& aDirection) { mDirection = aDirection; mMoment = mPoint / aDirection; };
+	inline void set(const CVector<float>& aDirection, const CVector<float>& aPoint)
+	{
+		mDirection = aDirection; vDir.assign(aDirection.data());
+		mPoint = aPoint; vPoint.assign(aPoint.data());
+		mMoment = aPoint / aDirection; vMom = vPoint * vDir; vDM = vDir *vMom;
+	};
+	inline void setDirection(const CVector<float>& aDirection)
+	{ 
+		mDirection = aDirection; vDir.assign(aDirection.data());
+		mMoment = mPoint / aDirection; vMom = vPoint * vDir; vDM = vDir *vMom;
+	};
+	inline void setPoint(const CVector<float>& aPoint) 
+	{ 
+		mPoint = aPoint; vPoint.assign(aPoint.data());
+		mMoment = aPoint / mDirection; vMom = vPoint * vDir; vDM = vDir *vMom;
+	};
 	inline CVector<float>& getDirection() { return mDirection; };
-	inline void setPoint(CVector<float>& aPoint) { mPoint = aPoint; mMoment = aPoint / mDirection; };
 	inline CVector<float>& getPoint() { return mPoint; };
 	inline CVector<float>& getMoment() { return mMoment; };
 	// Copy operator
@@ -66,6 +80,7 @@ protected:
 	CVector<float> mDirection;
 	CVector<float> mPoint;
 	CVector<float> mMoment;
+	miniBLAS::Vertex vDir, vPoint, vMom, vDM;
 };
 
 class CMeshMotion
@@ -138,12 +153,14 @@ public:
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
 	void rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth = false);
+	void rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
 	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);
 
 	void angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
+	void angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJAngles, miniBLAS::SQMat4x4(&M)[26]);
 	void invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
 	void twistToMatrix(CVector<float>& aTwist, CVector<CMatrix<float> >& M);
 
