@@ -20,11 +20,11 @@
 #ifndef CMeshH
 #define CMeshH
 
+#include "main.h"
 
 #include "CMatrix.h"
 #include "CTensor.h"
 #include "Show.h"
-#include <string>
 
 #define USE_SSE
 #define USE_SSE2

@@ -10,8 +10,8 @@
 
 //#include <dlib/optimization.h>
 
-#define POSPARAM_NUM 31
-#define SHAPEPARAM_NUM 20
+//#define POSPARAM_NUM 31
+//#define SHAPEPARAM_NUM 20
 using arColIS = arma::Col<char>;
 
 void printMat(const char *str, arma::mat m);
@@ -96,9 +96,9 @@ private:
 	void fitShapePose();
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
 	//基于ceres求解
-	void solvePose(const cv::Mat& idxNN, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale);
+	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale);
 	//基于ceres求解
-	void solveShape(const cv::Mat &idxNN, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
+	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
 	uint32_t updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
 	void solvePose_dlib();
 	void solveShape_dlib();

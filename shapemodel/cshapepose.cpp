@@ -106,7 +106,7 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 }
 VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	// Read object model
 	CMesh initMesh(initMesh_bk, nullptr);
@@ -168,7 +168,7 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 }
 VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	
 	// Read object model
@@ -221,7 +221,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 
 void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x 6449 x 3*/
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 
 	const float *pEV = evalue[0];
@@ -230,8 +230,8 @@ void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsI
 		shapePara[a] = shapeParamsIn[a] * pEV[a];
 
 	//For return data
-	points.zeros(6449, 3);
-	double *pointsOut = points.memptr();/* 6449x3*/
+	points.zeros(EVALUATE_POINTS_NUM, 3);
+	double *pointsOut = points.memptr();/* EVALUATE_POINTS_NUM(6449) x 3*/
 	joints.zeros(25, 8);
 	double *jointsOut = joints.memptr();/* 24x8: jid directions_XYZ positions_XYZ jparent_id*/
 	getpose(poseParamsIn, shapePara, eigenVectorsIn, numEigenVectors, pointsOut, jointsOut);

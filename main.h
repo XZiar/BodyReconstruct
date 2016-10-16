@@ -16,6 +16,7 @@
 #include <thread>
 
 #include <armadillo>
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/flann/flann.hpp>
 #include <pcl/io/ply_io.h>
@@ -23,6 +24,10 @@
 #include <pcl/point_types.h>
 #include <pcl/visualization/cloud_viewer.h>
 #include <ceres/ceres.h>
+
+static const uint32_t POSPARAM_NUM = 31;
+static const uint32_t SHAPEPARAM_NUM = 20;
+static const uint32_t EVALUATE_POINTS_NUM = 6449;
 
 
 uint64_t getCurTime();

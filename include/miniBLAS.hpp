@@ -521,7 +521,7 @@ public:
 	SQMat3x3() { };
 	SQMat3x3(const __m128 x_, const __m128 y_, const __m128 z_) :SQMat4x4(x_, y_, z_, _mm_setr_ps(1, 0, 0, 0)) { };
 
-	__m128 operator*(__m128 v) const
+	__m128 operator*(const __m128 v) const
 	{
 		const __m256 v256 = _mm256_set_m128(v, v);
 		const __m256 ans = _mm256_blend_ps(
