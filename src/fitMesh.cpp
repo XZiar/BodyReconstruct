@@ -52,6 +52,7 @@ static VertexVec armaTOcache(const arma::mat in, const uint32_t *idx, const uint
 static pcl::visualization::CloudViewer viewer("viewer");
 
 static atomic_uint32_t runcnt(0), runtime(0);
+static uint32_t nncnt = 0, nntime = 0;
 //Definition of optimization functions
 struct PoseCostFunctor
 {
@@ -926,7 +927,8 @@ void fitMesh::fitShapePose()
 	uint32_t sumVNN;
 
 	cv::Mat pointscv = armaTOcv(scanbody.points);
-	if (false)
+	//useFLANN = true;
+	if (useFLANN)
 	{
 		cv::flann::KDTreeIndexParams indexParams(8);
 		scanbody.kdtree = new cv::flann::Index(pointscv, indexParams);
@@ -959,8 +961,8 @@ void fitMesh::fitShapePose()
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
 	char tmp[1024];
-	sprintf(tmp, "\n\nPOSE : %d times, %f ms each.\nSHAPE: %d times, %f ms each.\nFinally valid nn: %d, total error: %f\n",
-		cSPose, tSPose / (cSPose * 1000), cSShape, tSShape / (cSShape * 1000), sumVNN, err);
+	sprintf(tmp, "\n\nKNN : %d times, %f ms each.\nPOSE : %d times, %f ms each.\nSHAPE: %d times, %f ms each.\nFinally valid nn: %d, total error: %f\n",
+		cMatchNN, tMatchNN / cMatchNN, cSPose, tSPose / (cSPose * 1000), cSShape, tSShape / (cSShape * 1000), sumVNN, err);
 	printf(tmp);
 	report += tmp;
 	{
@@ -1177,7 +1179,7 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 	arma::mat normalsSM, normals_faces;
 	calculateNormalsFaces(pointsSM, tempbody.faces, normals_faces);
 	calculateNormals(tempbody.points_idxes, tempbody.faces, normalsSM, normals_faces);
-
+	
 	uint64_t t1, t2;
 	cv::Mat idxsNNOLD(1, 1, CV_32S);
 	cv::Mat distNNOLD(1, 1, CV_32FC1);
@@ -1188,7 +1190,10 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 		scanbody.kdtree->knnSearch(cvPointsSM, idxsNNOLD, distNNOLD, 1);//the distance is L2 which is |D|^2
 		cv::sqrt(distNNOLD, distNNOLD);
 		t2 = getCurTime();
-		printf("cvFLANN uses %lld ms.\n", t2 - t1);
+		char tmp[256];
+		sprintf(tmp, "cvFLANN uses %lld ms.\n", t2 - t1);
+		printf(tmp);
+		report += tmp;
 	}
 
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S);
@@ -1197,10 +1202,15 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 		t1 = getCurTime();
 
 		auto tpPoints = armaTOcache(pointsSM);
+		//scanbody.nntree.searchOld(&tpPoints[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 		scanbody.nntree.search(&tpPoints[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
-		printf("sse4NN uses %lld ms.\n", t2 - t1);
+		cMatchNN++; tMatchNN += t2 - t1;
+		char tmp[256];
+		sprintf(tmp, "avxNN uses %lld ms.\n", t2 - t1);
+		printf(tmp);
+		report += tmp;
 	}
 
 	if (idxsNN.rows != tempbody.nPoints)
@@ -1297,7 +1307,7 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 		{
 			type = 1;
 			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "sse4KNN");
+			strcpy(name, "avxNN");
 			fwrite(name, sizeof(name), 1, fp);
 			cnt = tempbody.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);

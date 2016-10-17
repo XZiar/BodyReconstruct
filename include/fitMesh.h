@@ -72,8 +72,8 @@ public:
     arColIS isVisible;
 	cv::Mat idxsNN_;
 	arColIS isValidNN_;
-	double tSPose = 0, tSShape = 0;
-	uint32_t cSPose = 0, cSShape = 0;
+	double tSPose = 0, tSShape = 0, tMatchNN = 0;
+	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 	std::string report;
 
     CParams params;
