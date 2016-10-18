@@ -53,9 +53,8 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	initMesh.updateJntPos();
 
 	// read motion params from the precomputed 3D poses
-	const uint32_t numMotionParams = 31;
-	CVector<double> mParams(numMotionParams);
-	for (uint32_t i = 0; i < numMotionParams; i++)
+	CVector<double> mParams(POSPARAM_NUM);
+	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
 	{
 		mParams(i) = motionParamsIn[i];
 	}
@@ -119,7 +118,7 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh(vShape, &evecCache[0]);
+	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
 	return std::move(initMesh.vPoints);
 }
 VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn)
@@ -131,9 +130,8 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	initMesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
-	const uint32_t numMotionParams = 31;
-	CVector<double> mParams(numMotionParams);
-	for (uint32_t i = 0; i < numMotionParams; i++)
+	CVector<double> mParams(POSPARAM_NUM);
+	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
 	{
 		mParams(i) = poseParamsIn[i];
 	}
@@ -148,19 +146,7 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 
 	SQMat4x4 newM[26];
 	initMesh.angleToMatrixEx(mRBM, TW, newM);
-	//CVector<CMatrix<float> > M(initMesh.joints() + 1);
-	//initMesh.angleToMatrix(mRBM, TW, M);
-	/*
-		for (uint32_t a = 0; a < 26; ++a)
-		{
-			printf("matrix %d\n", a);
-			for (uint32_t b = 0; b < 4; ++b)
-			{
-				float *nM = (float*)&newM[a][b], *oM = M[a].data() + b * 4;
-				printf("new: %e,%e,%e,%e \t\told: %e,%e,%e,%e\n", nM[0], nM[1], nM[2], nM[3], oM[0], oM[1], oM[2], oM[3]);
-			}
-		}
-	*/
+
 	// rotate joints
 	initMesh.rigidMotionSim_AVX(newM, true);
 
@@ -174,28 +160,23 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	// Read object model
 	CMesh initMesh(initMesh_bk, nullptr);
 
-	Vertex vShape[6];
-	bool isAlign32 = (intptr_t(vShape) & 0x10) == 0;
+	Vertex vShape[5];
 	{
-		float *__restrict pShape = isAlign32 ? vShape[0] : vShape[1];
+		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
 		for (uint32_t a = 0; a < 20; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	if (isFastFitShape)
-		initMesh.fastShapeChangesToMesh_AVX(isAlign32 ? vShape : vShape + 1, &evecCache[0]);
-	else
-		initMesh.fastShapeChangesToMesh(isAlign32 ? vShape : vShape + 1, &evecCache[0]);
+	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
 
 	// update joints
 	initMesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
-	const uint32_t numMotionParams = 31;
-	CVector<double> mParams(numMotionParams);
-	for (uint32_t i = 0; i < numMotionParams; i++)
+	CVector<double> mParams(POSPARAM_NUM);
+	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
 	{
 		mParams(i) = poseParamsIn[i];
 	}
@@ -207,10 +188,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	{
 		TW(j) = (float)mParams(j);
 	}
-	/*
-	CVector<CMatrix<float> > M(initMesh.joints() + 1);
-	initMesh.angleToMatrix(mRBM, TW, M);
-	*/
+
 	SQMat4x4 newM[26];
 	initMesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints

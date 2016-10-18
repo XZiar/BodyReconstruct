@@ -614,23 +614,22 @@ void fitMesh::loadTemplate()
   */
 void fitMesh::loadModel()
 {
+	/*
     evectors.load(dataDir+"evectors_bin.mat");
-    //evectors.save(dataDir+"evectors_bin.mat",arma::arma_binary);
     cout<<"size of the eigen vectors: "<<evectors.n_rows<<", "<<evectors.n_cols<<endl;
     evectors = evectors.rows(0,params.nPCA-1);
     evectors.save(dataDir+"reduced_evectors.mat",arma::arma_binary);
+	*/
+    cout<<"loading eigen vectors...\n";
+	evectors.load(dataDir + "reduced_evectors.mat");
+	cout << "eigen vectors loaded, size is: " << evectors.n_rows << "," << evectors.n_cols << endl;
 
-    cout<<"loading eigen vectors..."<<endl;
-    evectors.load(dataDir+"reduced_evectors.mat");
-    cout<<"eigen vectors loaded, size is: "<<evectors.n_rows<<","<<evectors.n_cols<<endl;
-
-    cout<<"loading eigen values..."<<endl;
-    evalues.load(dataDir+"evalues.mat");
+    cout<<"loading eigen values...\n";
+	evalues.load(dataDir + "evalues.mat");
     evalues = evalues.cols(0,params.nPCA-1);
-    cout<<"eigen values loaded, size is: "<<evalues.n_rows<<","<<evalues.n_cols<<endl;
+	cout << "eigen values loaded, size is: " << evalues.n_rows << "," << evalues.n_cols << endl;
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
-	//printMatAll("evalues", evalues);
 }
 arma::mat fitMesh::test()
 {
@@ -867,7 +866,6 @@ void fitMesh::rigidAlignTemplate2ScanPCA()
     if(!scanbody.normals.empty())
     {
         scanbody.normals *= R;
-        //saveMat("scan_after.txt", scanbody.normals);
     }
     scanbody.T = T;
 
@@ -879,20 +877,14 @@ void fitMesh::rigidAlignTemplate2ScanPCA()
     if(true)
     {
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-
-        arma::mat pointsSM,jointsSM;
-        shapepose.getModel(tempbody.shape_params,tempbody.pose_params,pointsSM,jointsSM);
-
-        arma::mat normalsSM, normals_faces;
-        calculateNormalsFaces(pointsSM,tempbody.faces,normals_faces);
-        calculateNormals(tempbody.points_idxes,tempbody.faces,normalsSM,normals_faces);
-
-		showPoints(cloud, tempbody.points, normalsSM, pcl::PointXYZRGB(0, 192, 0));
-
+		{
+			arma::mat normals_faces;
+			calculateNormalsFaces(tempbody.points, tempbody.faces, normals_faces);
+			calculateNormals(tempbody.points_idxes, tempbody.faces, tempbody.normals, normals_faces);
+		}
+		showPoints(cloud, tempbody.points, tempbody.normals, pcl::PointXYZRGB(0, 192, 0));
 		showPoints(cloud, scanbody.points, scanbody.normals, pcl::PointXYZRGB(192, 0, 0));
-        //pcl::visualization::CloudViewer viewer1("cloud");
         viewer.showCloud(cloud);
-
     }
 
 }
@@ -957,7 +949,6 @@ void fitMesh::fitShapePose()
 		cout << tempbody.shape_params << endl;
 		cout << "----------------------------------------\n";
     }
-    //showResult(false);
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
 	char tmp[1024];
@@ -1040,8 +1031,6 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
     {
         return result;
     }
-
-    //saveMat("norm_knn.txt", normals_knn);
 
     const double mincos = cos(3.1415926 * angle_thres/180);
     arma::vec theta = sum(normals_knn % normals_tmp, 1);
@@ -1161,32 +1150,30 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 
 uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
-	arma::mat pointsSM;
-
 	auto pts = shapepose.getModelFast(tempbody.shape_params.memptr(), tempbody.pose_params.memptr());
 	{
-		pointsSM.resize(pts.size(), 3);
-		auto *px = pointsSM.memptr(), *py = px + pts.size(), *pz = py + pts.size();
-		for (uint32_t a = 0; a < pts.size(); ++a)
+		auto *px = tempbody.points.memptr(), *py = px + tempbody.nPoints, *pz = py + tempbody.nPoints;
+		for (uint32_t a = 0; a < tempbody.nPoints; ++a)
 		{
-			*px++ = pts[a].x;
-			*py++ = pts[a].y;
-			*pz++ = pts[a].z;
+			const Vertex tmp = pts[a] * scale;
+			*px++ = tmp.x;
+			*py++ = tmp.y;
+			*pz++ = tmp.z;
 		}
 	}
-	pointsSM = pointsSM * scale;
-	tempbody.points = pointsSM;
-	arma::mat normalsSM, normals_faces;
-	calculateNormalsFaces(pointsSM, tempbody.faces, normals_faces);
-	calculateNormals(tempbody.points_idxes, tempbody.faces, normalsSM, normals_faces);
-	
+	{
+		arma::mat normals_faces;
+		calculateNormalsFaces(tempbody.points, tempbody.faces, normals_faces);
+		calculateNormals(tempbody.points_idxes, tempbody.faces, tempbody.normals, normals_faces);
+	}
+
 	uint64_t t1, t2;
 	cv::Mat idxsNNOLD(1, 1, CV_32S);
 	cv::Mat distNNOLD(1, 1, CV_32FC1);
 	if(useFLANN)
 	{
 		t1 = getCurTime();
-		cv::Mat cvPointsSM = armaTOcv(pointsSM);
+		cv::Mat cvPointsSM = armaTOcv(tempbody.points);
 		scanbody.kdtree->knnSearch(cvPointsSM, idxsNNOLD, distNNOLD, 1);//the distance is L2 which is |D|^2
 		cv::sqrt(distNNOLD, distNNOLD);
 		t2 = getCurTime();
@@ -1194,6 +1181,12 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 		sprintf(tmp, "cvFLANN uses %lld ms.\n", t2 - t1);
 		printf(tmp);
 		report += tmp;
+		if (idxsNNOLD.rows != tempbody.nPoints)
+		{
+			cout << "error of the result of knn search \n";
+			getchar();
+			return 0;
+		}
 	}
 
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S);
@@ -1201,9 +1194,9 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 	{
 		t1 = getCurTime();
 
-		auto tpPoints = armaTOcache(pointsSM);
-		//scanbody.nntree.searchOld(&tpPoints[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
-		scanbody.nntree.search(&tpPoints[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		//auto tpPoints = armaTOcache(tempbody.points);
+		//scanbody.nntree.searchOld(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		scanbody.nntree.search(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
@@ -1211,12 +1204,6 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 		sprintf(tmp, "avxNN uses %lld ms.\n", t2 - t1);
 		printf(tmp);
 		report += tmp;
-	}
-
-	if (idxsNN.rows != tempbody.nPoints)
-	{
-		cout << "error of the result of knn search \n";
-		return 0;
 	}
 
 	//get the normal of the 1-NN point in scan data
@@ -1235,7 +1222,7 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 	}
 
 	//chech angles between norms of (the nearest point of scan) AND (object point of tbody)
-	arColIS isValidNN = checkAngle(normals_knn, normalsSM, angleLimit);
+	arColIS isValidNN = checkAngle(normals_knn, tempbody.normals, angleLimit);
 	//    for(uint32_t i=0;i<isValidNN.n_rows;i++)
 	//    {
 	//        if(distNN.at<float>(i,0)>480000)
@@ -1339,22 +1326,17 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 void fitMesh::showResult(bool isNN=false)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-
+	//show scan points
 	showPoints(cloud, scanbody.points, scanbody.normals, pcl::PointXYZRGB(192, 0, 0));
-
-    arma::mat pointsSM,jointsSM;
-	shapepose.getModel(tempbody.shape_params, tempbody.pose_params, pointsSM, jointsSM);
-	pointsSM *= scale;
-
-    if(isNN==true)
+    if(isNN)
     {
-		arma::Mat<uint8_t> colors_rd = arma::randi<arma::Mat<uint8_t>>(scanbody.points.n_rows, 3, arma::distr_param(0, 255));
+		const auto colors_rd = arma::randi<arma::Mat<uint8_t>>(scanbody.points.n_rows, 3, arma::distr_param(0, 255));
         for(uint32_t i=0; i<tempbody.points.n_rows; i++)
         {
-            const arma::Row<uint8_t>& cl = colors_rd.row(i);
+            const auto& cl = colors_rd.row(i);
             pcl::PointXYZRGB tmp_pt(cl(0), cl(1), cl(2));
 
-            const arma::rowvec& tpP = pointsSM.row(i);
+            const arma::rowvec& tpP = scanbody.points.row(i);
             tmp_pt.x = tpP(0);
             tmp_pt.y = tpP(1);
             tmp_pt.z = tpP(2);
@@ -1367,64 +1349,13 @@ void fitMesh::showResult(bool isNN=false)
             tmp_pt.z = scP(2);
             cloud->push_back(tmp_pt);
         }
-    //    arma::mat pointsorig,jointsorig;
-    //    shapepose.getModel(arma::zeros(1,SHAPEPARAM_NUM),tempbody.pose_params,pointsorig,jointsorig);
-    //    for(int i=0;i<tempbody.points.n_rows;i++)
-    //    {
-    //        tmp_pt.x = pointsorig(i,0);
-    //        tmp_pt.y = pointsorig(i,1);
-    //        tmp_pt.z = pointsorig(i,2);
-    //        tmp_pt.r = 0;
-    //        tmp_pt.g = 255;
-    //        tmp_pt.b = 128;
-    //        cloud->push_back(tmp_pt);
-    //    }
-        //
-        viewer.showCloud(cloud);
-    //    cout<<"close the window to continue"<<endl;
-    //    while(!viewer.wasStopped())
-    //    {
-    //        sleepMS(1000);
-    //    }
     }
     else
     {
-        arma::mat normalsSM, normals_faces;
-		calculateNormalsFaces(pointsSM, tempbody.faces, normals_faces);
-		calculateNormals(tempbody.points_idxes, tempbody.faces, normalsSM, normals_faces);
-
-		showPoints(cloud, pointsSM, normalsSM, pcl::PointXYZRGB(0, 192, 0));
-//        arma::mat pointsorig,jointsorig;
-//        shapepose.getModel(arma::zeros(1,SHAPEPARAM_NUM),tempbody.pose_params,pointsorig,jointsorig);
-//        arma::mat mshape = mean(pointsorig);
-
-//        for(int i=0;i<tempbody.points.n_rows;i++)
-//        {
-//            tmp_pt.x = pointsorig(i,0);
-//            tmp_pt.y = pointsorig(i,1);
-//            tmp_pt.z = pointsorig(i,2);
-//            if(tmp_pt.y<mshape(0,2)+10)
-//            {
-//                tmp_pt.r = 0;
-//                tmp_pt.g = 255;
-//                tmp_pt.b = 0;
-//            }
-//            else
-//            {
-//                tmp_pt.r = 255;
-//                tmp_pt.g = 0;
-//                tmp_pt.b = 0;
-//            }
-//            cloud->push_back(tmp_pt);
-//        }
-        //
-        viewer.showCloud(cloud);
-        //    cout<<"close the window to continue"<<endl;
-        //    while(!viewer.wasStopped())
-        //    {
-        //        sleepMS(1000);
-        //    }
+		//show templete points
+		showPoints(cloud, tempbody.points, tempbody.normals, pcl::PointXYZRGB(0, 192, 0));
     }
+	viewer.showCloud(cloud);
 }
 
 /*

@@ -2089,7 +2089,6 @@ std::vector<CMatrix<double> > CMesh::readShapeSpaceEigens(std::string fileName, 
 			&c[14], &c[15], &c[16], &c[17], &c[18], &c[19]);
 		for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
 		{
-
 			eigenVectors[i0](row, col) = atof(c[i0]);
 		}
 		row++;
@@ -2187,18 +2186,16 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	const __m128 sp5 = shapeParamsIn[4];
-	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp23 = _mm256_permute2f128_ps(sp12, sp34, 0b00100001);
-	const __m256 sp51 = _mm256_set_m128(shapeParamsIn[0], sp5), sp45 = _mm256_set_m128(sp5, shapeParamsIn[3]);
+	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
+	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
+	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
 	const Vertex *__restrict pEvec = eigenVectorsIn;
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
-		
 		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
 		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
 		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
 		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-		
 		const __m256 addA = _mm256_add_ps
 		(
 			_mm256_blend_ps(
@@ -2216,14 +2213,16 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 				_mm256_blend_ps(
 					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
 					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
-				_mm256_set_m128(_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/, vPoints[row])/*x,y,z,1;0,0,sz5,0*/
-			)/*sx05,sy0,sz0,1;0,sy1,sz5,0*/,
+				_mm256_insertf128_ps(
+					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
+					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
+			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
 			_mm256_blend_ps(
 				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
 				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
 				0b00100010)
-		)/*sx05,sy04,sz03,1;0,sy15,sz45,0*/;
-		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx0135,sy024,sz013,1;sx24,sy135,sz245,0*/;
+		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
+		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
 		const __m256 addBA = _mm256_permute2f128_ps(addAB, addAB, 0b01);
 		vPoints[row].assign(_mm256_castps256_ps128(_mm256_add_ps(addAB, addBA)));
 	}

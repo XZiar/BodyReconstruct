@@ -10,8 +10,6 @@
 
 //#include <dlib/optimization.h>
 
-//#define POSPARAM_NUM 31
-//#define SHAPEPARAM_NUM 20
 using arColIS = arma::Col<char>;
 
 void printMat(const char *str, arma::mat m);
@@ -110,6 +108,7 @@ public:
 	void loadModel();
 	void mainProcess();
 	arma::mat test();
+	/*it must be called after updatepoints cause it skip the update precess*/
 	void showResult(bool isNN);
 	//static double posecost_dlib(dlib::matrix<double, POSPARAM_NUM, 1> pose);
 	//static double shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape);
