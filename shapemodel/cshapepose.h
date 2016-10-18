@@ -5,8 +5,6 @@
 #include "main.h"
 #include "CTMesh.h"
 
-#define SMOOTHMODEL true
-
 class CShapePose
 {
 private:

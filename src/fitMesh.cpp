@@ -129,22 +129,20 @@ public:
 
 		const auto pts = shapepose_->getModelByPose(basePts, pose);
 		auto *__restrict pValid = isValidNN_.memptr();
-		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
+		uint32_t i = 0;
+		for (int j = 0; j < isValidNN_.n_elem; ++j)
 		{
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i++] = delta.x;
-				residual[i++] = delta.y;
-				residual[i++] = delta.z;
-			}
-			else
-			{
-				residual[i++] = 0;
-				residual[i++] = 0;
-				residual[i++] = 0;
+				residual[i + 0] = delta.x;
+				residual[i + 1] = delta.y;
+				residual[i + 2] = delta.z;
+				i += 3;
 			}
 		}
+		//printf("now i=%d, total=%d, demand=%d\n", i, isValidNN_.n_elem * 3, 3 * EVALUATE_POINTS_NUM);
+		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
 
 		runcnt++;
 		t2 = getCurTimeNS();
@@ -176,25 +174,20 @@ public:
 
 		const auto pts = shapepose_->getModelFast(shape, poseParam_.memptr());
 		auto *__restrict pValid = isValidNN_.memptr();
-		//float sumerr = 0;
-		for (int j = 0, i = 0; j < isValidNN_.n_elem; ++j)
+		uint32_t i = 0;
+		for (int j = 0; j < isValidNN_.n_elem; ++j)
 		{
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i++] = delta.x;
-				residual[i++] = delta.y;
-				residual[i++] = delta.z;
-				//sumerr += delta.length_sqr();
-			}
-			else
-			{
-				residual[i++] = 0;
-				residual[i++] = 0;
-				residual[i++] = 0;
+				residual[i + 0] = delta.x;
+				residual[i + 1] = delta.y;
+				residual[i + 2] = delta.z;
+				i += 3;
 			}
 		}
-		//printf("\nsumerr:%f\n\n", sumerr);
+		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
+		
 		runcnt++;
 		t2 = getCurTimeNS();
 		runtime += (uint32_t)((t2 - t1) / 1000);
@@ -1150,6 +1143,16 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 
 uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
+	if(false)
+	//if (yesORno("custom global transformation"))
+	{
+		auto * aptr = tempbody.pose_params.memptr();
+		printf("input rotate: ");
+		scanf("%lf%lf%lf", &aptr[0], &aptr[1], &aptr[2]);
+		printf("input translate: ");
+		scanf("%lf%lf%lf", &aptr[3], &aptr[4], &aptr[5]);
+		getchar();
+	}
 	auto pts = shapepose.getModelFast(tempbody.shape_params.memptr(), tempbody.pose_params.memptr());
 	{
 		auto *px = tempbody.points.memptr(), *py = px + tempbody.nPoints, *pz = py + tempbody.nPoints;

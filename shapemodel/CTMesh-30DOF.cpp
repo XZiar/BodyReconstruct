@@ -1631,10 +1631,6 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 		int i = jIds[ii - 1];
 		CMatrix<float> Mi(4, 4);
 		mJoint(i).angleToMatrixEx(aJAngles(i + 5), Mi); // i-1
-		//printM4x4("avx version", Mi.data());
-		//mJoint(i).angleToMatrix(aJAngles(i + 5), Mi); // i-1
-		//printM4x4("ori version", Mi.data());
-		//getchar();
 		for (int jj = 1; jj <= mJointNumber; jj++)
 		{
 			int j = jIds[jj - 1];
@@ -1662,9 +1658,9 @@ void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJ
 	{
 		uint32_t id = ids[ii];
 		auto Mi = mJoint(id).angleToMatrixEx(aJAngles(id + 5));
+		/*
 		CMatrix<float> oMi(4, 4);
 		mJoint(id).angleToMatrixEx(aJAngles(id + 5), oMi); // i-1
-		/*
 		printf("joint matrix %d\n", id);
 		for (uint32_t b = 0; b < 4; ++b)
 		{
@@ -2403,8 +2399,8 @@ void CMesh::updateJntPosEx()
 	static const uint8_t idxmap[][2] = //i0,i1*3
 	{ { 2,0 },{ 3,6 },{ 4,9 },{ 6,0 },{ 7,18 },{ 8,21 },{ 10,0 },{ 11,30 }, { 14,30 },{ 15,42 },{ 16,45 },{ 19,30 },{ 20,57 },{ 21,60 } };
 
-	CMatrix<float> newJntPos; newJntPos.setSize(mJointNumber, 3); //3D joints
-	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
+	CMatrix<float> newJntPos(mJointNumber, 3);//3D joints
+	CMatrix<float> joints0(mJointNumber, mJointNumber * 3);
 
 	const Vertex *__restrict pMinWgt = theMinWgtMat;
 	uint32_t mIdx = 0;
@@ -2416,16 +2412,18 @@ void CMesh::updateJntPosEx()
 		for (uint32_t b = wMatGap / 2; b--; pOri += 8, pMinWgt += 2)
 		{
 			const __m256 wgt = _mm256_load_ps(pMinWgt[0]);
-			sumPosA = _mm256_add_ps(sumPosA, _mm256_add_ps
+			const __m256 tmpA = _mm256_add_ps
 			(
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b00000000), _mm256_load_ps(pOri[0])),
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b01010101), _mm256_load_ps(pOri[2]))
-			));
-			sumPosB = _mm256_add_ps(sumPosB, _mm256_add_ps
+			);
+			const __m256 tmpB = _mm256_add_ps
 			(
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b10101010), _mm256_load_ps(pOri[4])),
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b11111111), _mm256_load_ps(pOri[6]))
-			));
+			);
+			sumPosA = _mm256_add_ps(sumPosA, tmpA);
+			sumPosB = _mm256_add_ps(sumPosB, tmpB);
 		}
 		sumPosA = _mm256_add_ps(sumPosA, sumPosB);
 		sumPosA = _mm256_add_ps(sumPosA, _mm256_permute2f128_ps(sumPosA, sumPosA, 0b00000001));

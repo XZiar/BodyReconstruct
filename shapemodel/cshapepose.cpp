@@ -12,12 +12,10 @@ using miniBLAS::Vertex;
 using miniBLAS::VertexVec;
 using miniBLAS::SQMat4x4;
 
-using EigenVec = vector<CMatrix<double> >;
-
 CShapePose::CShapePose()
 {
 	auto aModelFile = "../BodyReconstruct/data/model.dat";
-	initMesh_bk.readModel(aModelFile, SMOOTHMODEL);
+	initMesh_bk.readModel(aModelFile, true);
 	initMesh_bk.updateJntPos();
 	initMesh_bk.centerModel();
 	initMesh_bk.prepareData();
