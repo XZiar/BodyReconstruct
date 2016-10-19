@@ -119,6 +119,24 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
 	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
 	return std::move(initMesh.vPoints);
 }
+CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask)
+{
+	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
+	const uint32_t numEigenVectors = evectors.n_rows;
+	// Read object model
+	CMesh initMesh(initMesh_bk, nullptr);
+	Vertex vShape[5];
+	{
+		float *__restrict pShape = vShape[0];
+		const float *pEV = evalue[0];
+		for (uint32_t a = 0; a < 20; ++a)
+		{
+			*pShape++ = shapeParamsIn[a] * (*pEV++);
+		}
+	}
+	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
+	return initMesh;
+}
 VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn)
 {
 	// Read object model
@@ -149,6 +167,33 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	initMesh.rigidMotionSim_AVX(newM, true);
 
 	return std::move(initMesh.vPoints);
+}
+VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn, const char *__restrict validMask)
+{
+	// Read object model
+	CMesh initMesh(initMesh_bk, &baseMesh.vPoints, &baseMesh.validPts);
+	// update joints
+	initMesh.updateJntPosEx();
+
+	// read motion params from the precomputed 3D poses
+	CVector<double> mParams(POSPARAM_NUM);
+	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
+	{
+		mParams(i) = poseParamsIn[i];
+	}
+	CMatrix<float> mRBM(4, 4);
+	NRBM::RVT2RBM(&mParams, mRBM);
+	CVector<float> TW(initMesh.joints() + 6);
+	for (int j = 6; j < mParams.size(); ++j)
+	{
+		TW(j) = (float)mParams(j);
+	}
+	SQMat4x4 newM[26];
+	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	// rotate joints
+	initMesh.rigidMotionSim2_AVX(newM, true);
+
+	return std::move(initMesh.validPts);
 }
 VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
 {
@@ -234,9 +279,9 @@ VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, cons
 	SQMat4x4 newM[26];
 	initMesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints
-	initMesh.rigidMotionSim2_AVX(newM, validMask, true);
+	initMesh.rigidMotionSim2_AVX(newM, true);
 
-	return std::move(initMesh.vPoints);
+	return std::move(initMesh.validPts);
 }
 
 void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)

@@ -784,6 +784,23 @@ void CMesh::prepareData()
 	thePtSmooth = &ptSmooth[0];
 }
 
+void CMesh::preCompute(const char *__restrict validMask)
+{
+	validPtSmooth.clear();
+	validSmtCnt.clear();
+	for (uint32_t row = 0, smtIdx = 0; row < mNumPoints; ++row)
+	{
+		const uint32_t sc = theSmtCnt[row];
+		if (validMask[row] != 0)
+		{
+			validSmtCnt.push_back(sc);
+			validPtSmooth.insert(validPtSmooth.end(), &thePtSmooth[smtIdx], &thePtSmooth[smtIdx + sc]);
+		}
+		smtIdx += sc;
+	}
+	validPts.resize(validSmtCnt.size());
+}
+
 void CMesh::centerModel()
 {
 
@@ -1342,29 +1359,24 @@ void CMesh::rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
 		pSP += sc;
 	}
 }
-void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restrict validMask, const bool smooth)
+void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
 {
 	using miniBLAS::Vertex;
 	// Apply motion to points
-	const SmoothParam *__restrict pSP = thePtSmooth;
-	const uint32_t *__restrict pSC = theSmtCnt;
-	Vertex *__restrict pPt = &vPoints[0];
+	const SmoothParam *__restrict pSP = theVPtSmooth;
+	const uint32_t *__restrict pSC = theVSmtCnt;
+	const uint32_t cnt = validPts.size();
 	__m128 *pMat = &M[0][0];
-	for (uint32_t i = 0, outi = 0; i < mNumPoints; i++)
+	for (uint32_t i = 0; i < cnt; i++)
 	{
 		const uint32_t sc = pSC[i];
-		if (validMask[i] == 0)
-		{
-			pSP += sc;
-			continue;
-		}
-		const __m128 dat = vPoints[i]; const __m256 adat = _mm256_set_m128(dat, dat);
+		const __m128 dat = validPts[i]; const __m256 adat = _mm256_set_m128(dat, dat);
 		switch (sc)
 		{
 		case 1:
 		{
 			const __m128 *trans = &pMat[pSP[0].idx];
-			(pPt++)->assign(_mm_blend_ps
+			validPts[i].assign(_mm_blend_ps
 			(
 				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
 				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
@@ -1384,7 +1396,7 @@ void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restri
 					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
 				)/*x0,y0,z0,0;x1,y1,z1,0*/
 			);
-			(pPt++)->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
 			break;
 		}
 		case 3:
@@ -1410,7 +1422,7 @@ void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restri
 			)/*x0,y0,z0,0;x1,y1,z1,0*/
 			);
 			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			(pPt++)->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
 			break;
 		}
 		default://just consider first 4
@@ -1436,7 +1448,7 @@ void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restri
 			)/*x2,y2,z2,0;x3,y3,z3,0*/
 			);
 			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			(pPt++)->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
 			break;
 		}
 		}
@@ -1745,7 +1757,7 @@ void CMesh::operator=(const CMesh& aMesh)
 	thePtSmooth = &ptSmooth[0];
 }
 
-CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
+CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn)
 {
 	using miniBLAS::Vertex;
 	isCopy = true;
@@ -1778,10 +1790,18 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 	theMinWgtMat = from.theMinWgtMat;
 	thePtSmooth = from.thePtSmooth;
 	theSmtCnt = from.theSmtCnt;
+	theVPtSmooth = &from.validPtSmooth[0];
+	theVSmtCnt = &from.validSmtCnt[0];
 	if (pointsIn == nullptr)
 		vPoints = from.vPoints;
 	else
 		vPoints = *pointsIn;
+	if (vpIn == nullptr)
+		validPts.resize(from.validPts.size());
+	else
+	{
+		validPts = *vpIn;
+	}
 }
 
 void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
@@ -2163,15 +2183,10 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	}
 }
 
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn, const char *__restrict validMask)
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
 {
 	using miniBLAS::Vertex;
 	const uint32_t numEigenVectors = 20;
-	const bool isMask = (validMask != nullptr); uint32_t smtIdx = 0;
-	//validPts.clear();
-	//validSmtCnt.clear();
-	//validPtSmooth.clear();
-
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
@@ -2213,16 +2228,56 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
 		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
 		vPoints[row].assign(newval);
-		/*{
-			const uint32_t sc = theSmtCnt[row];
-			if (validMask[row] != 0)
-			{
-				validPts.push_back(newval);
-				validSmtCnt.push_back(sc);
-				validPtSmooth.insert(validPtSmooth.end(), &thePtSmooth[smtIdx], &thePtSmooth[smtIdx + sc]);
-			}
-			smtIdx += sc;
-		}*/
+	}
+}
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn, const char *__restrict validMask)
+{
+	using miniBLAS::Vertex;
+	const uint32_t numEigenVectors = 20;
+	//row * col(3) * z(20 = 5Vertex)
+	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
+	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
+	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
+	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
+	const Vertex *__restrict pEvec = eigenVectorsIn;
+	for (uint32_t row = 0, vldIdx = 0; row < mNumPoints; row++, pEvec += 16)
+	{
+		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
+		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
+		const __m256 addA = _mm256_add_ps
+		(
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
+				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
+				0b00100010),
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
+				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
+				0b01000100)
+		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
+		const __m256 addB = _mm256_add_ps
+		(
+			_mm256_add_ps(
+				_mm256_blend_ps(
+					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
+					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
+				_mm256_insertf128_ps(
+					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
+					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
+			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
+			_mm256_blend_ps(
+				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
+				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
+				0b00100010)
+		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
+		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
+		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
+		vPoints[row].assign(newval);
+
+		if (validMask[row] != 0)
+			validPts[vldIdx++].assign(newval);
 	}
 }
 

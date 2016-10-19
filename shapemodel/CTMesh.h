@@ -118,13 +118,15 @@ class CMesh
 public:
 	bool isCopy = false;
 	void prepareData();
+	void preCompute(const char *__restrict validMask);
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn, 
-		const char *__restrict validMask = nullptr);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn,
+		const char *__restrict validMask);
 	int updateJntPos();
 	void updateJntPosEx();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
@@ -132,7 +134,7 @@ public:
 	// constructor
 	inline CMesh();
 	inline CMesh(const CMesh& aMesh);
-	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
+	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn = nullptr);
 	CMesh(int aPoints, int aPatches);
 	// destructor
 	~CMesh();
@@ -154,7 +156,7 @@ public:
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
 	void rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
-	void rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restrict validMask, const bool smooth = false);
+	void rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
 	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
@@ -242,7 +244,7 @@ public:
 	//inline CVector<CMeshMotion>& history() {return mHistory;};
 
 	miniBLAS::VertexVec vPoints;
-	//miniBLAS::VertexVec validPts;
+	miniBLAS::VertexVec validPts;
 protected:
 	struct SmoothParam
 	{
@@ -251,11 +253,13 @@ protected:
 	};
 	std::vector<uint32_t> smtCnt;
 	const uint32_t *theSmtCnt = nullptr;
-	//std::vector<uint32_t> validSmtCnt;
+	std::vector<uint32_t> validSmtCnt;
+	const uint32_t *theVSmtCnt = nullptr;
 
 	std::vector<SmoothParam> ptSmooth;
 	const SmoothParam *thePtSmooth = nullptr;
-	//std::vector<SmoothParam> validPtSmooth;
+	std::vector<SmoothParam> validPtSmooth;
+	const SmoothParam *theVPtSmooth = nullptr;
 
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
