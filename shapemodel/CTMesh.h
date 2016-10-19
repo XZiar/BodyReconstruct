@@ -123,7 +123,8 @@ public:
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn, 
+		const char *__restrict validMask = nullptr);
 	int updateJntPos();
 	void updateJntPosEx();
 	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
@@ -152,8 +153,8 @@ public:
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
-	void rigidMotionSim_AVX(const CVector<CMatrix<float> >& M, const bool smooth = false);
 	void rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
+	void rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const char *__restrict validMask, const bool smooth = false);
 	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
@@ -241,6 +242,7 @@ public:
 	//inline CVector<CMeshMotion>& history() {return mHistory;};
 
 	miniBLAS::VertexVec vPoints;
+	//miniBLAS::VertexVec validPts;
 protected:
 	struct SmoothParam
 	{
@@ -249,8 +251,12 @@ protected:
 	};
 	std::vector<uint32_t> smtCnt;
 	const uint32_t *theSmtCnt = nullptr;
+	//std::vector<uint32_t> validSmtCnt;
+
 	std::vector<SmoothParam> ptSmooth;
 	const SmoothParam *thePtSmooth = nullptr;
+	//std::vector<SmoothParam> validPtSmooth;
+
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
 	miniBLAS::VertexVec minWgtMat;

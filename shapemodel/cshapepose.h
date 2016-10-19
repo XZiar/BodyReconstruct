@@ -21,6 +21,8 @@ public:
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn);
 	miniBLAS::VertexVec getModelByPose(const miniBLAS::VertexVec& basePoints, const double *__restrict poseParamsIn);
 	miniBLAS::VertexVec getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn);
+	miniBLAS::VertexVec getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn,
+		const char *__restrict validMask);
 	void getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints);
 	void getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints);
 	void setEvectors(arma::mat &evectorsIn);

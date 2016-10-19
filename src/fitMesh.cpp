@@ -160,11 +160,18 @@ private:
 	const arColIS isValidNN_;
 	const cv::Mat idxNN_;
 	const VertexVec& scanCache_;
+	VertexVec validScanCache;
 
 public:
 	ShapeCostFunctorEx(CShapePose *shapepose, const arma::mat poseParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
 		: shapepose_(shapepose), poseParam_(poseParam), isValidNN_(isValidNN), scanCache_(scanCache)
 	{
+		const auto *__restrict pValid = isValidNN_.memptr();
+		for (uint32_t i = 0; i < isValidNN_.n_elem; ++i)
+		{
+			if (pValid[i] != 0)
+				validScanCache.push_back(scanCache_[i]);
+		}
 	}
 	//w is the parameters to be estimated, b is the bias, residual is to return
 	bool operator() (const double* shape, double* residual) const
@@ -172,9 +179,10 @@ public:
 		uint64_t t1, t2;
 		t1 = getCurTimeNS();
 
-		const auto pts = shapepose_->getModelFast(shape, poseParam_.memptr());
-		auto *__restrict pValid = isValidNN_.memptr();
+		const auto *__restrict pValid = isValidNN_.memptr();
+		const auto pts = shapepose_->getModelFast2(shape, poseParam_.memptr(), pValid);
 		uint32_t i = 0;
+		/*
 		for (int j = 0; j < isValidNN_.n_elem; ++j)
 		{
 			if (pValid[j])
@@ -186,7 +194,17 @@ public:
 				i += 3;
 			}
 		}
-		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
+		*/
+		const uint32_t cnt = validScanCache.size();
+		for (uint32_t j = 0; j < cnt; ++j)
+		{
+			const Vertex delta = validScanCache[j] - pts[j];
+			residual[i + 0] = delta.x;
+			residual[i + 1] = delta.y;
+			residual[i + 2] = delta.z;
+			i += 3;
+		}
+		memset(&residual[i], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
 		
 		runcnt++;
 		t2 = getCurTimeNS();
