@@ -65,6 +65,7 @@ public:
 	uint32_t curFrame = 0;
 
 	bool isFastCost = false;
+	bool isAgLimNN = false;
 	bool useFLANN = false;
     int angleLimit;
 	double scale;

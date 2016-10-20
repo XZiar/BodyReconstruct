@@ -908,7 +908,7 @@ void fitMesh::rigidAlignTemplate2ScanPCA()
     }
     scanbody.T = T;
 
-	scanbody.nntree.init(scanbody.points);
+	scanbody.nntree.init(scanbody.points, scanbody.normals);
 
 	isFastCost = yesORno("use fast cost func?");
 
@@ -939,6 +939,7 @@ void fitMesh::mainProcess()
     loadTemplate();
     rigidAlignTemplate2ScanPCA();
 	angleLimit = isVtune ? 30 : inputNumber("angle limit");
+	isAgLimNN = yesORno("apply angle limit to NN-search");
     fitModel();
 }
 void fitMesh::fitModel()
@@ -1254,9 +1255,14 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 	{
 		t1 = getCurTime();
 
-		//auto tpPoints = armaTOcache(tempbody.points);
 		//scanbody.nntree.searchOld(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
-		scanbody.nntree.search(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		if (isAgLimNN)
+		{
+			auto tpNorms = armaTOcache(tempbody.normals);
+			scanbody.nntree.searchOnAngle(&pts[0], &tpNorms[0], tempbody.nPoints, angleLimit, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+		}
+		else
+			scanbody.nntree.search(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
@@ -1272,7 +1278,9 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 	for (uint32_t i = 0; i < tempbody.nPoints; i++, ++pNN)
 	{
 		const int idx = *pNN;
-		if (idx < 0 || idx >= scanbody.nPoints)
+		if (idx > 65530)
+			continue;
+		if (idx < 0 || idx > scanbody.nPoints)
 		{
 			cout << "error idx when copy knn normal\n";
 			cin.ignore();
