@@ -46,6 +46,18 @@ struct CTemplate
     uint32_t nPoints;
 };
 
+struct ModelParam
+{
+	double pose[POSPARAM_NUM];
+	double shape[SHAPEPARAM_NUM];
+	ModelParam() { };
+	ModelParam(const CTemplate m)
+	{
+		memcpy(pose, m.pose_params.memptr(), sizeof(pose));
+		memcpy(shape, m.shape_params.memptr(), sizeof(shape));
+	};
+};
+
 struct CParams
 {
     int nPCA;
@@ -61,6 +73,8 @@ public:
 	static ctools tools;
 	std::vector<uint32_t> tpFaceMap;
 	CScan scanbody;
+	std::vector<CScan> scanFrames;
+	std::vector<ModelParam> modelParams;
 
 	uint32_t curFrame = 0;
 
@@ -86,31 +100,37 @@ public:
 	virtual ~fitMesh();
 
 private:
+	arma::mat rotateMat;
+	arma::rowvec totalShift, baseShift;
+	double totalScale;
+
 	static void loadScan(const std::string& fname, const bool isYFlip, CParams& params, CScan& scan);
 	void calculateNormals(const std::vector<uint32_t> &points, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces);
 	void calculateNormalsFaces(arma::mat &points, arma::mat &faces, arma::mat &normals_faces);
 	std::vector<uint32_t> getVertexFacesIdx(int point_idx, arma::mat &faces);
 	void rigidAlignTemplate2ScanPCA();
 	arma::mat rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth);
+	void FrameRigidAlign(CScan& scan);
 	void rigidAlignTemplate2ScanLandmarks();
 	void fitModel();
+	bool fitFrame();
 	void fitShapePose();
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
 	//基于ceres求解
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale);
 	//基于ceres求解
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
-	uint32_t updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
-
+	uint32_t updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
+	uint32_t updateMatch(CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
+	/*it must be called after updatepoints cause it skip the update precess*/
+	void showResult(const bool isNN = false);
+	void showResult(const CScan& scan, const bool isNN = false);
 public:
 	void loadLandmarks();
 	void loadScan();
-	void loadNextScan();
 	void loadTemplate();
 	void loadModel();
 	void mainProcess();
-	/*it must be called after updatepoints cause it skip the update precess*/
-	void showResult(bool isNN);
 };
 
 #endif // FITMESH_H
