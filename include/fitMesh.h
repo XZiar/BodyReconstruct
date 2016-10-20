@@ -8,8 +8,6 @@
 
 #include "kdNNTree.h"
 
-//#include <dlib/optimization.h>
-
 using arColIS = arma::Col<char>;
 
 void printMat(const char *str, arma::mat m);
@@ -60,8 +58,11 @@ class fitMesh
 public:
 	static CTemplate tempbody;
 	static CShapePose shapepose;
+	static ctools tools;
 	std::vector<uint32_t> tpFaceMap;
 	CScan scanbody;
+
+	uint32_t curFrame = 0;
 
 	bool isFastCost = false;
 	bool useFLANN = false;
@@ -78,12 +79,13 @@ public:
     arma::mat evectors;//the eigen vetors of the body shape model
     arma::mat evalues;
     std::string dataDir;
-    ctools tools;
+	std::string baseFName;
 public:
 	fitMesh();
 	virtual ~fitMesh();
 
 private:
+	static void loadScan(const std::string& fname, const bool isYFlip, CParams& params, CScan& scan);
 	void calculateNormals(const std::vector<uint32_t> &points, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces);
 	void calculateNormalsFaces(arma::mat &points, arma::mat &faces, arma::mat &normals_faces);
 	std::vector<uint32_t> getVertexFacesIdx(int point_idx, arma::mat &faces);
@@ -98,20 +100,16 @@ private:
 	//基于ceres求解
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam, double &scale);
 	uint32_t updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
-	void solvePose_dlib();
-	void solveShape_dlib();
 
 public:
 	void loadLandmarks();
 	void loadScan();
+	void loadNextScan();
 	void loadTemplate();
 	void loadModel();
 	void mainProcess();
-	arma::mat test();
 	/*it must be called after updatepoints cause it skip the update precess*/
 	void showResult(bool isNN);
-	//static double posecost_dlib(dlib::matrix<double, POSPARAM_NUM, 1> pose);
-	//static double shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape);
 };
 
 #endif // FITMESH_H

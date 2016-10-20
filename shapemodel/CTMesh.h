@@ -266,6 +266,7 @@ protected:
 	miniBLAS::VertexVec minWgtMat;
 	const miniBLAS::Vertex *theMinWgtMat = nullptr;
 	miniBLAS::Vertex minEleSum[14];
+	const miniBLAS::Vertex *theMinEleSum = nullptr;
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;

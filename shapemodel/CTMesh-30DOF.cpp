@@ -782,6 +782,7 @@ void CMesh::prepareData()
 	}
 	theSmtCnt = &smtCnt[0];
 	thePtSmooth = &ptSmooth[0];
+	theMinEleSum = &minEleSum[0];
 }
 
 void CMesh::preCompute(const char *__restrict validMask)
@@ -1749,7 +1750,7 @@ void CMesh::operator=(const CMesh& aMesh)
 
 	wgtMat = aMesh.wgtMat;
 	minWgtMat = aMesh.minWgtMat;
-	memcpy(minEleSum, aMesh.minEleSum, sizeof(minEleSum));
+	theMinEleSum = aMesh.theMinEleSum;
 	wMatGap = aMesh.wMatGap;
 	theMinWgtMat = &minWgtMat[0];
 	vPoints = aMesh.vPoints;
@@ -1786,7 +1787,7 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniB
 
 	//avoid overhead of copying data unecessarily
 	wMatGap = from.wMatGap;
-	memcpy(minEleSum, from.minEleSum, sizeof(minEleSum));
+	theMinEleSum = from.theMinEleSum;
 	theMinWgtMat = from.theMinWgtMat;
 	thePtSmooth = from.thePtSmooth;
 	theSmtCnt = from.theSmtCnt;
@@ -2484,7 +2485,7 @@ void CMesh::updateJntPosEx()
 		}
 		sumPosA = _mm256_add_ps(sumPosA, sumPosB);
 		sumPosA = _mm256_add_ps(sumPosA, _mm256_permute2f128_ps(sumPosA, sumPosA, 0b00000001));
-		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), minEleSum[mIdx++]));
+		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), theMinEleSum[mIdx++]));
 		joints0.putToY3(puter, item[0], item[1]);
 	}
 

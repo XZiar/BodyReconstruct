@@ -483,58 +483,9 @@ static void saveMat(const char* fname, const arma::mat& m)
 	fclose(fp);
 }
 
-/*
-double fitMesh::posecost_dlib(dlib::matrix<double, POSPARAM_NUM, 1> pose)
-{
-    arma::mat pointsSM,jointsSM;
-    arma::mat poseParam(1,POSPARAM_NUM);
-    for(int i=0;i<POSPARAM_NUM;i++)
-    {
-        poseParam(0,i)=pose(i);
-    }
-    shapepose.getModel(tempbody.shape_params, poseParam,pointsSM,jointsSM);
-
-//        pointsSM = pointsSM * scale[0];
-    arma::mat delta;
-    double residual = 0;
-    for(int j=0; j<idxsNN_.rows; j++)
-    {
-        if(isValidNN_(j))
-        {
-            delta = scanbody.points.row(idxsNN_.at<int>(j,0))-pointsSM.row(j);
-            residual += delta(0,0)*delta(0,0)+delta(0,1)*delta(0,1)+delta(0,2)*delta(0,2);
-        }
-    }
-    return residual;
-}
-
-double fitMesh::shapecost_dlib(dlib::matrix<double, SHAPEPARAM_NUM, 1> shape)
-{
-    arma::mat pointsSM,jointsSM;
-    arma::mat shapeParam(1,SHAPEPARAM_NUM);
-    for(int i=0;i<SHAPEPARAM_NUM;i++)
-    {
-        shapeParam(0,i)=shapeParam(i);
-    }
-    shapepose.getModel(shapeParam, tempbody.pose_params,pointsSM,jointsSM);
-
-//        pointsSM = pointsSM * scale[0];
-    arma::mat delta;
-    double residual = 0;
-    for(int j=0; j<idxsNN_.rows; j++)
-    {
-        if(isValidNN_(j))
-        {
-            delta = scanbody.points.row(idxsNN_.at<int>(j,0))-pointsSM.row(j);
-            residual += delta(0,0)*delta(0,0)+delta(0,1)*delta(0,1)+delta(0,2)*delta(0,2);
-        }
-    }
-    return residual;
-}
-*/
-
 CShapePose fitMesh::shapepose;
 CTemplate fitMesh::tempbody;
+ctools fitMesh::tools;
 
 fitMesh::fitMesh()
 {
@@ -564,83 +515,89 @@ void fitMesh::loadLandmarks()
   */
 void fitMesh::loadScan()
 {
-    PointCloudT::Ptr cloud_tmp(new PointCloudT);
-    pcl::PolygonMesh mesh;
-
-    string fname = dataDir+"scan";
+	bool isYFlip = true;
+	string fname = dataDir + "scan";
     printf("###wait for input scan num: ");
     int ret = getchar();
-    if(!(ret == 13 || ret == 10))
-        getchar();
-    if(ret >= '0' && ret <= '9')
-        fname += (char)ret;
+	if (!(ret == 13 || ret == 10))
+	{
+		getchar();
+		if (ret >= '0' && ret <= '9')
+			fname += (char)ret;
+		else
+		{
+			baseFName = dataDir + "/clips/clouds" + (char)ret;
+			fname = baseFName + "_0";
+			curFrame = 0;
+			isYFlip = false;
+		}
+	}
     fname += ".ply";
+	fitMesh::loadScan(fname, isYFlip, params, scanbody);
+}
+void fitMesh::loadNextScan()
+{
+	string fname = baseFName + "_" + std::to_string(curFrame) + ".ply";
+	fitMesh::loadScan(fname, false, params, scanbody);
+}
+void fitMesh::loadScan(const std::string& fname, const bool isYFlip, CParams& params, CScan& scan)
+{
+	PointCloudT::Ptr cloud_tmp(new PointCloudT);
+	pcl::PolygonMesh mesh;
 
-    cout<<"loading "<<fname<<endl;
-    int read_status = pcl::io::loadPLYFile(fname, *cloud_tmp);
-//    pcl::io::loadPLYFile(dataDir+"scan.ply",mesh);
-//    int nrows = mesh.polygons.size();
-//    pcl::Vertices tmpv = mesh.polygons[1];
-//    int ncols = 3;
-//    cout<<nrows<<","<<ncols<<endl;
-//    arma::mat faces(nrows,ncols);
-//    for(int i=0;i<mesh.polygons.size();i++)
-//    {
-//        pcl::Vertices tmp = mesh.polygons[i];
-//        for(int j=0;j<3;j++)
-//        {
-//            faces(i,j)=tmp.vertices[j];
-//        }
+	cout << "loading " << fname << endl;
+	const int read_status = pcl::io::loadPLYFile(fname, *cloud_tmp);
+	printf("read status: %d, load %lld points AND normals.\n", read_status, cloud_tmp->points.size());
 
-//    }
-//    cin.ignore();
+	scan.nPoints = cloud_tmp->points.size();
+	scan.points_orig.resize(scan.nPoints, 3);
+	scan.normals_orig.resize(scan.nPoints, 3);
+	uint32_t idx = 0;
+	if (isYFlip)
+	{
+		for (const PointT& pt : cloud_tmp->points)//m 2 mm
+		{
+			scan.points_orig.row(idx) = arma::rowvec({ pt.x, -pt.y, pt.z }) * 1000;
+			scan.normals_orig.row(idx) = arma::rowvec({ pt.normal_x, -pt.normal_y, pt.normal_z });
+			idx++;
+		}
+	}
+	else
+	{
+		for (const PointT& pt : cloud_tmp->points)//m 2 mm
+		{
+			scan.points_orig.row(idx) = arma::rowvec({ pt.x, pt.y, pt.z }) * 1000;
+			scan.normals_orig.row(idx) = arma::rowvec({ pt.normal_x, pt.normal_y, pt.normal_z });
+			idx++;
+		}
+	}
+	//normalize the normals
+	scan.normals_orig = arma::normalise(scan.normals_orig, 2, 1);
 
-	printf("read status: %d, load %d points AND normals.\n", read_status, cloud_tmp->points.size());
-
-    PointT tmpPt;
-    arma::mat points(cloud_tmp->points.size(),3);
-    arma::mat normals(cloud_tmp->points.size(),3);
-
-    uint32_t idx = 0;
-    for(const PointT& pt : cloud_tmp->points)//m 2 mm
-    {
-        points.row(idx) = arma::rowvec({pt.x, -pt.y, pt.z})*1000;
-        normals.row(idx) = arma::rowvec({pt.normal_x, -pt.normal_y, pt.normal_z});
-        idx++;
-    }
-    //normalize the normals
-    normals = arma::normalise(normals,2,1);
-
-    scanbody.points_orig = points;
-    scanbody.normals_orig = normals;
-    scanbody.nPoints = points.n_rows;
-    //no faces will be loaded, and the normals are calculated when sampling the scan datas
-    ///sample the scan points if necessary;
-    if(scanbody.points_orig.n_rows <= params.nSamplePoints)//Not sample the scan points
-    {
-        params.nSamplePoints = scanbody.points_orig.n_rows;
-        scanbody.sample_point_idxes.clear();
-		for (uint32_t i = 0; i < scanbody.nPoints; i++)
-        {
-            scanbody.sample_point_idxes.push_back(i);
-        }
-        scanbody.points = scanbody.points_orig;
-        scanbody.normals = scanbody.normals_orig;
-    }
-    else
-    {
-		scanbody.sample_point_idxes = tools.randperm(scanbody.nPoints, params.nSamplePoints);
-        scanbody.points = arma::zeros(params.nSamplePoints,3);
-        scanbody.normals = arma::zeros(params.nSamplePoints,3);
-		for (int i = 0; i < params.nSamplePoints; i++)
-        {
-            scanbody.points.row(i) = scanbody.points_orig.row(scanbody.sample_point_idxes[i]);
-            scanbody.normals.row(i) = scanbody.normals_orig.row(scanbody.sample_point_idxes[i]);
-        }
-        scanbody.nPoints = params.nSamplePoints;
-    }
-
-   // arma::mat absn = arma::sqrt(arma::sum(scanbody.normals%scanbody.normals,1));
+	//no faces will be loaded, and the normals are calculated when sampling the scan datas
+	if (scan.nPoints <= params.nSamplePoints)//Not sample the scan points
+	{
+		params.nSamplePoints = scan.nPoints;
+		scan.sample_point_idxes.clear();
+		for (uint32_t i = 0; i < scan.nPoints; i++)
+		{
+			scan.sample_point_idxes.push_back(i);
+		}
+		scan.points = scan.points_orig;
+		scan.normals = scan.normals_orig;
+	}
+	else//sample the scan points if necessary;
+	{
+		scan.sample_point_idxes = tools.randperm(scan.nPoints, params.nSamplePoints);
+		scan.points = arma::zeros(params.nSamplePoints, 3);
+		scan.normals = arma::zeros(params.nSamplePoints, 3);
+		for (uint32_t i = 0; i < params.nSamplePoints; i++)
+		{
+			scan.points.row(i) = scan.points_orig.row(scan.sample_point_idxes[i]);
+			scan.normals.row(i) = scan.normals_orig.row(scan.sample_point_idxes[i]);
+		}
+		scan.nPoints = params.nSamplePoints;
+	}
 }
 
 /** @brief loadTemplate
@@ -650,7 +607,7 @@ void fitMesh::loadScan()
 void fitMesh::loadTemplate()
 {
     arma::mat faces;
-    faces.load(dataDir+"faces.mat");
+	faces.load(dataDir + "faces.mat");
     cout<<"Template faces loaded: "<<faces.n_rows<<","<<faces.n_cols<<endl;
     tempbody.faces = faces-1;
 	
@@ -722,16 +679,7 @@ void fitMesh::loadModel()
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
 }
-arma::mat fitMesh::test()
-{
-    arma::mat points,joints;
-    arma::mat shapeParam,poseParam;
-    shapeParam = shapeParam.zeros(1,params.nPCA);
-    poseParam = poseParam.zeros(1,POSPARAM_NUM);
-    shapepose.getModel(shapeParam,poseParam,points,joints);
-    return points;
-    //cout<<"points:"<<points<<endl;
-}
+
 void fitMesh::calculateNormals(const vector<uint32_t> &points_idxes, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces)
 {
     //points_idxes is the indexes of the points that sampled frome the scan,how ever the normals are computed from all scan
@@ -1369,7 +1317,7 @@ uint32_t fitMesh::updatePoints(cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, doub
 
 	//if(false)
 	{
-		FILE *fp = fopen("output.data", "w");
+		FILE *fp = fopen("output.data", "wb");
 		uint32_t cnt;
 		uint8_t type;
 		char name[16] = { 0 };
@@ -1469,35 +1417,3 @@ void fitMesh::showResult(bool isNN=false)
     }
 	viewer.showCloud(cloud);
 }
-
-/*
-void fitMesh::solvePose_dlib()
-{
-    dlib::matrix<double,POSPARAM_NUM,1> pose;
-    for(int i=0;i<POSPARAM_NUM;i++)
-    {
-        pose(i)=tempbody.pose_params(i);
-    }
-    dlib::find_min_using_approximate_derivatives(dlib::bfgs_search_strategy(),
-                                                 dlib::objective_delta_stop_strategy(1e-7),posecost_dlib,pose,-1);
-    for(int i=0;i<POSPARAM_NUM;i++)
-    {
-        tempbody.pose_params(i)=pose(i);
-    }
-}
-
-void fitMesh::solveShape_dlib()
-{
-    dlib::matrix<double,SHAPEPARAM_NUM,1> shape;
-    for(int i=0;i<SHAPEPARAM_NUM;i++)
-    {
-        shape(i)=tempbody.shape_params(i);
-    }
-    dlib::find_min_using_approximate_derivatives(dlib::bfgs_search_strategy(),
-                                                 dlib::objective_delta_stop_strategy(1e-7),shapecost_dlib,shape,-1);
-    for(int i=0;i<SHAPEPARAM_NUM;i++)
-    {
-        tempbody.shape_params(i)=shape(i);
-    }
-}
-*/

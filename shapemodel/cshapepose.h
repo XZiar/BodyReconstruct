@@ -17,7 +17,6 @@ private:
 
 public:
 	bool isFastFitShape = false;
-	bool isPrint = true;
 	CShapePose();
 	void preCompute(const char *__restrict validMask) { initMesh_bk.preCompute(validMask); };
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn);
