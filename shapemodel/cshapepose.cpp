@@ -101,25 +101,25 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	}
 	return 0;
 }
-VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn)
+VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	// Read object model
-	CMesh initMesh(initMesh_bk, nullptr);
+	CMesh mesh(initMesh_bk, nullptr);
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
-		for (uint32_t a = 0; a < 20; ++a)
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
-	return std::move(initMesh.vPoints);
+	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
+	return std::move(mesh.vPoints);
 }
-CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask)
+CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask) const
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
@@ -129,7 +129,7 @@ CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const ch
 	{
 		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
-		for (uint32_t a = 0; a < 20; ++a)
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
@@ -137,13 +137,13 @@ CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const ch
 	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
 	return initMesh;
 }
-VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn)
+VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn) const
 {
 	// Read object model
-	CMesh initMesh(initMesh_bk, &basePoints);
+	CMesh mesh(initMesh_bk, &basePoints);
 
 	// update joints
-	initMesh.updateJntPosEx();
+	mesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -154,26 +154,26 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(initMesh.joints() + 6);
+	CVector<float> TW(mesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
 
 	SQMat4x4 newM[26];
-	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	mesh.angleToMatrixEx(mRBM, TW, newM);
 
 	// rotate joints
-	initMesh.rigidMotionSim_AVX(newM, true);
+	mesh.rigidMotionSim_AVX(newM, true);
 
-	return std::move(initMesh.vPoints);
+	return std::move(mesh.vPoints);
 }
-VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn, const char *__restrict validMask)
+VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn, const char *__restrict validMask) const
 {
 	// Read object model
-	CMesh initMesh(initMesh_bk, &baseMesh.vPoints, &baseMesh.validPts);
+	CMesh mesh(initMesh_bk, &baseMesh.vPoints, &baseMesh.validPts);
 	// update joints
-	initMesh.updateJntPosEx();
+	mesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -183,39 +183,39 @@ VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__res
 	}
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
-	CVector<float> TW(initMesh.joints() + 6);
+	CVector<float> TW(mesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
 	SQMat4x4 newM[26];
-	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	mesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints
-	initMesh.rigidMotionSim2_AVX(newM, true);
+	mesh.rigidMotionSim2_AVX(newM, true);
 
-	return std::move(initMesh.validPts);
+	return std::move(mesh.validPts);
 }
-VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn)
+VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 	
 	// Read object model
-	CMesh initMesh(initMesh_bk, nullptr);
+	CMesh mesh(initMesh_bk, nullptr);
 
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
-		for (uint32_t a = 0; a < 20; ++a)
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
+	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
 
 	// update joints
-	initMesh.updateJntPosEx();
+	mesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -226,40 +226,40 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(initMesh.joints() + 6);
+	CVector<float> TW(mesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
 
 	SQMat4x4 newM[26];
-	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	mesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints
-	initMesh.rigidMotionSim_AVX(newM, true);
+	mesh.rigidMotionSim_AVX(newM, true);
 
-	return std::move(initMesh.vPoints);
+	return std::move(mesh.vPoints);
 }
-VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask)
+VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask) const
 {
 	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
 	const uint32_t numEigenVectors = evectors.n_rows;
 
 	// Read object model
-	CMesh initMesh(initMesh_bk, nullptr);
+	CMesh mesh(initMesh_bk, nullptr);
 
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
 		const float *pEV = evalue[0];
-		for (uint32_t a = 0; a < 20; ++a)
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
 		{
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
+	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
 
 	// update joints
-	initMesh.updateJntPosEx();
+	mesh.updateJntPosEx();
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -270,18 +270,18 @@ VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, cons
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(initMesh.joints() + 6);
+	CVector<float> TW(mesh.joints() + 6);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
 	}
 
 	SQMat4x4 newM[26];
-	initMesh.angleToMatrixEx(mRBM, TW, newM);
+	mesh.angleToMatrixEx(mRBM, TW, newM);
 	// rotate joints
-	initMesh.rigidMotionSim2_AVX(newM, true);
+	mesh.rigidMotionSim2_AVX(newM, true);
 
-	return std::move(initMesh.validPts);
+	return std::move(mesh.validPts);
 }
 
 void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)
@@ -290,8 +290,8 @@ void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsI
 	const uint32_t numEigenVectors = evectors.n_rows;
 
 	const float *pEV = evalue[0];
-	double shapePara[20];
-	for (uint32_t a = 0; a < 20; ++a)
+	double shapePara[SHAPEPARAM_NUM];
+	for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
 		shapePara[a] = shapeParamsIn[a] * pEV[a];
 
 	//For return data
@@ -309,12 +309,11 @@ void CShapePose::getModel(const arma::mat &shapeParam, const arma::mat &posePara
 	getModel(shapeParamsIn, poseParamsIn, points, joints);
 }
 
-void CShapePose::setEvectors(arma::mat &evectorsIn)
+void CShapePose::setEvectors(const arma::mat &evectorsIn)
 {
 	evectors = evectorsIn;
 
-	const uint32_t numEigenVectors = evectorsIn.n_rows;
-	if (numEigenVectors != 20)
+	if (evectorsIn.n_rows != SHAPEPARAM_NUM || SHAPEPARAM_NUM != 20)
 	{
 		printf("evecctors should be 20 for optimization.\n\n");
 		getchar();
@@ -339,8 +338,7 @@ void CShapePose::setEvectors(arma::mat &evectorsIn)
 
 void CShapePose::setEvalues(const arma::mat & inEV)
 {
-	const uint32_t num = inEV.n_elem;
-	if (num != 20)
+	if (inEV.n_elem != SHAPEPARAM_NUM || SHAPEPARAM_NUM != 20)
 	{
 		printf("evelues should be 20 for optimization.\n\n");
 		getchar();
@@ -348,7 +346,7 @@ void CShapePose::setEvalues(const arma::mat & inEV)
 	}
 	const auto *pIn = inEV.memptr();
 	float *pOut = evalue[0];
-	for (uint32_t a = num; a--;)
+	for (uint32_t a = SHAPEPARAM_NUM; a--;)
 		*pOut++ = *pIn++;
 	
 	evalue[0].do_sqrt();

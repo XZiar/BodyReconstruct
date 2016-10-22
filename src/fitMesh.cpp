@@ -176,16 +176,14 @@ struct PoseCostFunctorEx
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
-	CShapePose *shapepose_;
-	const arma::mat shapeParam_;
+	const CShapePose *shapepose_;
 	const arColIS isValidNN_;
 	const VertexVec& scanCache_;
 	const VertexVec basePts;
 
 public:
-	PoseCostFunctorEx(CShapePose *shapepose, const arma::mat shapeParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), shapeParam_(shapeParam), isValidNN_(isValidNN),
-		scanCache_(scanCache), basePts(shapepose_->getBaseModel(shapeParam.memptr()))
+	PoseCostFunctorEx(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape))
 	{
 	}
 	//pose is the parameters to be estimated, b is the bias, residual is to return
@@ -221,14 +219,14 @@ struct ShapeCostFunctorEx
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
-	CShapePose *shapepose_;
-	const arma::mat poseParam_;
+	const CShapePose *shapepose_;
+	const double (&poseParam_)[POSPARAM_NUM];
 	const arColIS isValidNN_;
 	const cv::Mat idxNN_;
 	const VertexVec& scanCache_;
 public:
-	ShapeCostFunctorEx(CShapePose *shapepose, const arma::mat poseParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), poseParam_(poseParam), isValidNN_(isValidNN), scanCache_(scanCache)
+	ShapeCostFunctorEx(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
 	{
 	}
 	//w is the parameters to be estimated, b is the bias, residual is to return
@@ -238,7 +236,7 @@ public:
 		t1 = getCurTimeNS();
 
 		const auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelFast(shape, poseParam_.memptr());
+		const auto pts = shapepose_->getModelFast(shape, poseParam_);
 		uint32_t i = 0;
 		for (int j = 0; j < isValidNN_.n_elem; ++j)
 		{
@@ -263,16 +261,15 @@ struct PoseCostFunctorEx2
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
-	CShapePose *shapepose_;
-	const arma::mat shapeParam_;
+	const CShapePose *shapepose_;
 	const arColIS isValidNN_;
 	const VertexVec& validScanCache_;
 	const CMesh baseMesh;
 
 public:
-	PoseCostFunctorEx2(CShapePose *shapepose, const arma::mat shapeParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), shapeParam_(shapeParam), isValidNN_(isValidNN),
-		validScanCache_(validScanCache), baseMesh(shapepose_->getBaseModel2(shapeParam.memptr(), isValidNN_.memptr()))
+	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
+		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
+		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
 	}
 	//pose is the parameters to be estimated, b is the bias, residual is to return
@@ -306,14 +303,14 @@ struct ShapeCostFunctorEx2
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
-	CShapePose *shapepose_;
-	const arma::mat poseParam_;
+	const CShapePose *shapepose_;
+	const double (&poseParam_)[POSPARAM_NUM];
 	const arColIS isValidNN_;
 	const cv::Mat idxNN_;
 	const VertexVec& validScanCache_;
 public:
-	ShapeCostFunctorEx2(CShapePose *shapepose, const arma::mat poseParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), poseParam_(poseParam), isValidNN_(isValidNN), validScanCache_(validScanCache)
+	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
+		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache)
 	{
 	}
 	//w is the parameters to be estimated, b is the bias, residual is to return
@@ -323,7 +320,7 @@ public:
 		t1 = getCurTimeNS();
 
 		const auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelFast2(shape, poseParam_.memptr(), pValid);
+		const auto pts = shapepose_->getModelFast2(shape, poseParam_, pValid);
 		uint32_t i = 0;
 
 		const uint32_t cnt = validScanCache_.size();
@@ -422,6 +419,14 @@ void printMatAll(const char * str, arma::mat m)
        printf("\n");
     });
 }
+template<uint32_t N>
+static void printArray(const char* str, const double(&array)[N])
+{
+	printf("%s:\t", str);
+	for (uint32_t a = 0; a < N; ++a)
+		printf("%f ", array[a]);
+	printf("\n");
+}
 
 static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const arma::mat& model, pcl::PointXYZRGB color)
 {
@@ -462,13 +467,6 @@ static cv::Mat armaTOcv(const arma::mat in)
             ptr += step;
         }
     }
-    if(false)
-    {
-        for(uint32_t c = 0; c < in.n_cols; ++c)
-            for(uint32_t r = 0; r < in.n_rows; ++r)
-                if(abs(in(r,c) - out.at<float>(r,c)) > 0.001)
-                    printf("error at %d,%d\n",r,c);
-    }
     return out;
 }
 
@@ -487,18 +485,18 @@ CShapePose fitMesh::shapepose;
 CTemplate fitMesh::tempbody;
 ctools fitMesh::tools;
 
-fitMesh::fitMesh()
+fitMesh::fitMesh(std::string dir)
 {
-    //ctor
     params.nPCA = SHAPEPARAM_NUM;
     params.nPose = POSPARAM_NUM;
-    dataDir = "../BodyReconstruct/data/";
     params.nSamplePoints = 60000;
+	dataDir = dir;
+	loadModel();
+	loadTemplate();
 }
 
 fitMesh::~fitMesh()
 {
-    //dtor
 }
 /** @brief loadLandmarks
   *
@@ -513,32 +511,25 @@ void fitMesh::loadLandmarks()
   *
   * @todo: document this function
   */
-void fitMesh::loadScan()
-{
-	bool isYFlip = true;
-	string fname = dataDir + "scan";
-    printf("###wait for input scan num: ");
-    int ret = getchar();
-	if (!(ret == 13 || ret == 10))
-	{
-		getchar();
-		if (ret >= '0' && ret <= '9')
-			fname += (char)ret;
-		else
-		{
-			baseFName = dataDir + "/clips/clouds" + (char)ret;
-			fname = baseFName + "_0";
-			curFrame = 0;
-			isYFlip = false;
-		}
-	}
-    fname += ".ply";
-	fitMesh::loadScan(fname, isYFlip, params, scanbody);
-}
-void fitMesh::loadScan(const std::string& fname, const bool isYFlip, CParams& params, CScan& scan)
+bool fitMesh::loadScan(CParams& params, CScan& scan)
 {
 	PointCloudT::Ptr cloud_tmp(new PointCloudT);
 	pcl::PolygonMesh mesh;
+	const bool isYFlip = mode;
+	string fname = dataDir + baseFName;
+	if (mode)
+		fname += ".ply";
+	else
+		fname += "_" + std::to_string(curFrame) + ".ply";
+	{
+		FILE* fp = fopen(fname.c_str(), "rb");
+		if (fp == nullptr)
+		{
+			printf("File %s not exist!\n", fname.c_str());
+			return false;
+		}
+		fclose(fp);
+	}
 
 	cout << "loading " << fname << endl;
 	const int read_status = pcl::io::loadPLYFile(fname, *cloud_tmp);
@@ -593,6 +584,7 @@ void fitMesh::loadScan(const std::string& fname, const bool isYFlip, CParams& pa
 		}
 		scan.nPoints = params.nSamplePoints;
 	}
+	return true;
 }
 
 /** @brief loadTemplate
@@ -614,8 +606,8 @@ void fitMesh::loadTemplate()
     tempbody.meanShape.load(dataDir+"meanShape.mat");
 //    cout<<"mean shape loaded, size is: "<<tempbody.meanShape.n_rows<<", "<<tempbody.meanShape.n_cols<<endl;
 	tempbody.points = tempbody.meanShape.each_row() - mean(tempbody.meanShape);
-	tempbody.shape_params = zeros(1, params.nPCA);
-	tempbody.pose_params = zeros(1, params.nPose);
+	//tempbody.shape_params = zeros(1, params.nPCA);
+	//tempbody.pose_params = zeros(1, params.nPose);
     tempbody.points_idxes.clear();
     tempbody.nPoints = tempbody.points.n_rows;
 	//useless, just use an increasing idx
@@ -750,7 +742,7 @@ vector<uint32_t> fitMesh::getVertexFacesIdx(int point_idx, arma::mat &faces)
    return pointFacesIdx;
 }
 
-arma::vec searchShoulder(arma::mat model, const unsigned int lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
+arma::vec fitMesh::searchShoulder(arma::mat model, const unsigned int lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
 {
     arma::mat max_m = max(model,0);
     arma::mat min_m = min(model,0);
@@ -826,7 +818,7 @@ arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, dou
     return Rmat * R;
 }
 
-void fitMesh::rigidAlignTemplate2ScanPCA()
+void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
 {
     //align the scan points to the template based on PCA, note the coordinates direction
     cout<<"align with pca\n";
@@ -862,8 +854,7 @@ void fitMesh::rigidAlignTemplate2ScanPCA()
     arma::mat R = (eig_vec * Rsc.i()).t();
 
     double dDepth = 0;
-    if(yesORno("do fix"))
-        R = rigidAlignFix(scpoint, R, dDepth);
+    R = rigidAlignFix(scpoint, R, dDepth);
 
     //finally rotate scan body
     scpoint *= R;
@@ -908,8 +899,6 @@ void fitMesh::rigidAlignTemplate2ScanPCA()
 
 	scanbody.nntree.init(scanbody.points, scanbody.normals);
 
-	isFastCost = yesORno("use fast cost func?");
-
     //show the initial points
     if(true)
     {
@@ -929,7 +918,7 @@ void fitMesh::rigidAlignTemplate2ScanLandmarks()
     //align the scan according to the landmarks
 }
 
-void fitMesh::FrameRigidAlign(CScan& scan)
+void fitMesh::DirectRigidAlign(CScan& scan)
 {
 	scan.points.each_row() -= baseShift;
 	//Translate the normals
@@ -943,94 +932,7 @@ void fitMesh::FrameRigidAlign(CScan& scan)
 	scan.nntree.init(scan.points, scan.normals);
 }
 
-void fitMesh::mainProcess()
-{
-    //The main process of the fitting procedue
-    loadScan();
-    loadModel();
-    loadTemplate();
-    rigidAlignTemplate2ScanPCA();
-	angleLimit = isVtune ? 30 : inputNumber("angle limit");
-	isAgLimNN = yesORno("apply angle limit to NN-search");
-    fitModel();
-	if (isVtune)
-		return;
-	scanFrames.clear();
-	scanFrames.push_back(scanbody);
-	modelParams.push_back(ModelParam(tempbody));
-	while (yesORno("fit next frame?"))
-	{
-		if (!fitFrame())
-			break;
-	}
-}
-void fitMesh::fitModel()
-{
-    //Fit the model to the scan data
-    fitShapePose();
-}
-bool fitMesh::fitFrame()
-{
-	curFrame += 10;
-	string fname = baseFName + "_" + std::to_string(curFrame) + ".ply";
-	{
-		FILE* fp = fopen(fname.c_str(), "rb");
-		if (fp == nullptr)
-			return false;
-		fclose(fp);
-	}
-	scanFrames.push_back(CScan());
-	CScan& curScan = scanFrames.back();
-	//load next scan frame
-	fitMesh::loadScan(fname, false, params, curScan);
-	//rigid align the scan
-	FrameRigidAlign(curScan);
-	getchar();
-
-	//fitPoseOnly
-	double err = 0;
-	double scale = 1;
-	uint32_t sumVNN;
-	{
-		report = "";
-		cMatchNN = cSPose = cSShape = 0;
-		tMatchNN = tSPose = tSShape = 0;
-	}
-	sumVNN = updatePoints(curScan, idxsNN_, isValidNN_, scale, err);
-	showResult(curScan, false);
-	for (int idx = 0; idx < 3; idx++)
-	{
-		auto scanCache = isFastCost ?
-			armaTOcache(curScan.points, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr(), idxsNN_.rows) :
-			armaTOcache(curScan.points, idxsNN_.ptr<uint32_t>(), idxsNN_.rows);
-		if (isFastCost)
-			shapepose.preCompute(isValidNN_.memptr());
-		cout << "fit pose\n";
-		solvePose(scanCache, isValidNN_, tempbody.pose_params, tempbody.shape_params, scale);
-		cout << "========================================\n";
-		sumVNN = updatePoints(curScan, idxsNN_, isValidNN_, scale, err);
-		showResult(curScan, false);
-		getchar();
-	}
-	cout << tempbody.pose_params << endl;
-	cout << "----------------------------------------\n";
-
-	char tmp[1024];
-	sprintf(tmp, "\n\nKNN : %d times, %f ms each.\nPOSE : %d times, %f ms each.\nFinally valid nn: %d, total error: %f\n",
-		cMatchNN, tMatchNN / cMatchNN, cSPose, tSPose / (cSPose * 1000), sumVNN, err);
-	printf(tmp);
-	report += tmp;
-	{
-		auto fname = std::to_string(getCurTime()) + "xx.log";
-		FILE *fp = fopen(fname.c_str(), "w");
-		fprintf(fp, report.c_str());
-		fclose(fp);
-	}
-
-	modelParams.push_back(ModelParam(tempbody));
-	return true;
-}
-void fitMesh::fitShapePose()
+void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solveS, uint32_t iter)
 {
     //Initialization of the optimizer
     vector<int> idxHand;//the index of hands
@@ -1039,41 +941,46 @@ void fitMesh::fitShapePose()
     double errPrev = 0;
     double err=0;
 	uint32_t sumVNN;
-
-	cv::Mat pointscv = armaTOcv(scanbody.points);
-
+	tSPose = tSShape = tMatchNN = 0;
+	cSPose = cSShape = cMatchNN = 0;
+	report = "";
+	/*
 	if (useFLANN)
 	{
+		cv::Mat pointscv = armaTOcv(scan.points);
 		cv::flann::KDTreeIndexParams indexParams(8);
-		scanbody.kdtree = new cv::flann::Index(pointscv, indexParams);
+		scan.kdtree = new cv::flann::Index(pointscv, indexParams);
 		cout << "cv kd tree build, scan points number: " << pointscv.rows << endl;
 	}
-
-	updatePoints(scanbody, idxsNN_, isValidNN_, scale, err);
-    showResult(false);
+	*/
+	sumVNN = updatePoints(scan, idxsNN_, isValidNN_, scale, err);
+    showResult(scan, false);
 	errPrev = err + eps_err + 1;
     //Optimization Loop
    // while(fabs(err-errPrev)>eps_err)
-	for (int idx = 0; idx < 10; idx++)
+	while(iter--)
 	{
         errPrev = err;//update the error
-		auto scanCache = isFastCost ? 
-			armaTOcache(scanbody.points, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr(), idxsNN_.rows) :
-			armaTOcache(scanbody.points, idxsNN_.ptr<uint32_t>(), idxsNN_.rows);
+		const auto scanCache = isFastCost ? 
+			armaTOcache(scan.points, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr(), idxsNN_.rows) :
+			armaTOcache(scan.points, idxsNN_.ptr<uint32_t>(), idxsNN_.rows);
 		if(isFastCost)
 			shapepose.preCompute(isValidNN_.memptr());
-		cout << "fit pose\n";
-		solvePose(scanCache, isValidNN_, tempbody.pose_params, tempbody.shape_params, scale);
-		//solvePose_dlib();
-		cout << "fit shape\n";
-		solveShape(scanCache, isValidNN_, tempbody.pose_params, tempbody.shape_params, scale);
-
-        //solveShape_dlib();
+		if (solveP)
+		{
+			cout << "fit pose\n";
+			solvePose(scanCache, isValidNN_, curMParam, scale);
+		}
+		if (solveS)
+		{
+			cout << "fit shape\n";
+			solveShape(scanCache, isValidNN_, curMParam, scale);
+		}
 		cout << "========================================\n";
-		sumVNN = updatePoints(scanbody, idxsNN_, isValidNN_, scale, err);
-        showResult(false);
-		cout << tempbody.pose_params << endl;
-		cout << tempbody.shape_params << endl;
+		sumVNN = updatePoints(scan, idxsNN_, isValidNN_, scale, err);
+        showResult(scan, false);
+		printArray("pose param", curMParam.pose);
+		printArray("shape param", curMParam.shape);
 		cout << "----------------------------------------\n";
     }
     //wait until the window is closed
@@ -1089,61 +996,8 @@ void fitMesh::fitShapePose()
 		fprintf(fp, report.c_str());
 		fclose(fp);
 	}
-//        [poseParams, ~] = fmincon(@PoseFunc,poseParams,[],[],[],[],poseLB,poseUB,[],options);
-//        [pointsSM, ~] = shapepose(poseParams(1:end-1),shapeParams(1:end-1),evectors,modelDir);
-//        sc = poseParams(end);
-//        pointsSM = sc * pointsSM;
-//        idxsNN = knnsearch(scan.points,pointsSM);
-
-//        % check the angle between normals
-//        normalsScan = normalsScanAll(idxsNN,:);
-//        normalsSM = getNormals(pointsSM, template.faces);
-//        normalsSM = getNormals1Face(1:nPoints,template.faces,normalsSM);
-//        isValidNN = checkAngle(normalsScan,normalsSM,threshNormAngle);
-
-//        % do not register open to closed hands
-//        isValidNN(idxHand) = 0;
-
-//        if (~isempty(template.idxsUse))
-//            % use only subset of vertices
-//            isValidNN = isValidNN.*template.idxsUse;
-//        end
-//        fprintf('sum(isValidNN): %1.1f\n',sum(isValidNN));
-//        if (bFitShape)
-//            fprintf('fit shape\n');
-//            shapeParams(end) = sc;
-//            [shapeParams, ~] = fmincon(@ShapeFunc, shapeParams,[],[],[],[],shapeLB,shapeUB,[],options);
-//            % new model code
-//            [pointsSM, ~] = shapepose(poseParams(1:end-1),shapeParams(1:end-1),evectors,modelDir);
-//            sc = shapeParams(end);
-//            pointsSM = sc * pointsSM;
-//            [idxsNN, distNN] = knnsearch(scan.points,pointsSM);
-
-//            % check the angle between normals
-//            normalsScan = normalsScanAll(idxsNN,:);
-//            normalsSM = getNormals(pointsSM,template.faces);
-//            normalsSM = getNormals1Face(1:nPoints,template.faces,normalsSM);
-//            isValidNN = checkAngle(normalsScan,normalsSM,threshNormAngle);
-
-//            % do not register open to closed hands
-//            isValidNN(idxHand) = 0;
-
-//            if (~isempty(template.idxsUse))
-//                % use only subset of vertices
-//                isValidNN = isValidNN.*template.idxsUse;
-//            end
-//        end
-
-//        distAll = distNN' * isValidNN;
-//        err = distAll / sum(isValidNN);
-
-//        poseParams(end) = sc;
-//    end
 }
 
-/** @brief checkAngle
-  * @param angle_thres max angle(in degree) between two norms
-  */
 arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &normals_tmp, const double angle_thres)
 {
     const uint32_t rowcnt = normals_tmp.n_rows;
@@ -1164,9 +1018,9 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
     return result;
 }
 
-void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, arma::mat &poseParam, const arma::mat &shapeParam, double &scale)
+void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, double &scale)
 {
-	double *pose = poseParam.memptr();
+	double *pose = tpParam.pose;
 
     cout<<"construct problem: pose\n";
 	Problem problem;
@@ -1174,13 +1028,13 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	if (isFastCost)
 	{
 		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
-			(new PoseCostFunctorEx2(&shapepose, shapeParam, isValidNN, scanCache));
+			(new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
 	}
 	else
 	{
 		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctorEx, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
-			(new PoseCostFunctorEx(&shapepose, shapeParam, isValidNN, scanCache));
+			(new PoseCostFunctorEx(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx, NULL, pose);
 		/*auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
 			(new PoseCostFunctor(&shapepose, shapeParam, isValidNN, idxsNN_, scanbody.points));
@@ -1215,9 +1069,9 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	report += tmp;
 }
 
-void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, const arma::mat &poseParam, arma::mat &shapeParam,double &scale)
+void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam,double &scale)
 {
-	double *shape = shapeParam.memptr();
+	double *shape = tpParam.shape;
 
     Problem problem;
 	cout << "construct problem: SHAPE\n";
@@ -1226,13 +1080,13 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 	if (isFastCost)
 	{
 		auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorEx2(&shapepose, poseParam, isValidNN, scanCache));
+			(new ShapeCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx2, NULL, shape);
 	}
 	else
 	{
 		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorEx(&shapepose, poseParam, isValidNN, scanCache));
+			(new ShapeCostFunctorEx(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx, NULL, shape);
 		/*auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
 			(new ShapeCostFunctor(&shapepose, poseParam, isValidNN, idxsNN_, scanbody.points, scale));
@@ -1268,7 +1122,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 
 uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
-	auto pts = shapepose.getModelFast(tempbody.shape_params.memptr(), tempbody.pose_params.memptr());
+	auto pts = shapepose.getModelFast(curMParam.shape, curMParam.pose);
 	{
 		auto *px = tempbody.points.memptr(), *py = px + tempbody.nPoints, *pz = py + tempbody.nPoints;
 		for (uint32_t a = 0; a < tempbody.nPoints; ++a)
@@ -1439,10 +1293,6 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 
 	return sumVNN;
 }
-void fitMesh::showResult(const bool isNN)
-{
-	showResult(scanbody, isNN);
-}
 void fitMesh::showResult(const CScan& scan, const bool isNN)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -1472,4 +1322,40 @@ void fitMesh::showResult(const CScan& scan, const bool isNN)
 		showPoints(cloud, tempbody.points, tempbody.normals, pcl::PointXYZRGB(0, 192, 0));
     }
 	viewer.showCloud(cloud);
+}
+
+void fitMesh::init(const std::string& baseName, const bool isOnce)
+{
+	mode = isOnce;
+	baseFName = baseName;
+	isFastCost = yesORno("use fast cost func?");
+	angleLimit = isVtune ? 30 : inputNumber("angle limit");
+	isAgLimNN = yesORno("apply angle limit to NN-search");
+}
+void fitMesh::mainProcess()
+{
+	scanFrames.clear();
+	scanFrames.push_back(CScan());
+	CScan& firstScan = scanFrames.back();
+	loadScan(params, firstScan);
+	rigidAlignTemplate2ScanPCA(firstScan);
+	fitShapePose(firstScan);
+	modelParams.push_back(curMParam);
+	if (!isVtune)
+		getchar();
+	if (mode)//only once
+		return;
+	while (yesORno("fit next frame?"))
+	{
+		curFrame += 1;
+		scanFrames.push_back(CScan());
+		CScan& curScan = scanFrames.back();
+		if (!loadScan(params, curScan))
+			break;
+		//rigid align the scan
+		DirectRigidAlign(curScan);
+		fitShapePose(curScan, true, false, 3);
+		modelParams.push_back(curMParam);
+	}
+	getchar();
 }
