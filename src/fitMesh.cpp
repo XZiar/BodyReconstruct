@@ -23,6 +23,36 @@ using miniBLAS::VertexVec;
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
+
+SimpleLog::SimpleLog()
+{
+	fname = std::to_string(getCurTime()) + ".log";
+}
+
+SimpleLog::~SimpleLog()
+{
+	if (fp != nullptr)
+		fclose(fp);
+}
+
+SimpleLog & SimpleLog::log(const std::string& str, const bool isPrint)
+{
+	cache += str;
+	if (isPrint)
+		printf("%s", str.c_str());
+	return *this;
+}
+
+void SimpleLog::flush()
+{
+	if (fp == nullptr)
+		fp = fopen(fname.c_str(), "w");
+	fprintf(fp, cache.c_str());
+	cache = "";
+}
+
+
+
 static VertexVec armaTOcache(const arma::mat in)
 {
 	const uint32_t cnt = in.n_rows;
@@ -943,7 +973,6 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
 	uint32_t sumVNN;
 	tSPose = tSShape = tMatchNN = 0;
 	cSPose = cSShape = cMatchNN = 0;
-	report = "";
 	/*
 	if (useFLANN)
 	{
@@ -985,17 +1014,11 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
     }
     //wait until the window is closed
 	cout << "optimization finished, close the window to quit\n";
-	char tmp[1024];
-	sprintf(tmp, "\n\nKNN : %d times, %f ms each.\nPOSE : %d times, %f ms each.\nSHAPE: %d times, %f ms each.\nFinally valid nn: %d, total error: %f\n",
-		cMatchNN, tMatchNN / cMatchNN, cSPose, tSPose / (cSPose * 1000), cSShape, tSShape / (cSShape * 1000), sumVNN, err);
-	printf(tmp);
-	report += tmp;
-	{
-		auto fname = std::to_string(getCurTime()) + ".log";
-		FILE *fp = fopen(fname.c_str(), "w");
-		fprintf(fp, report.c_str());
-		fclose(fp);
-	}
+	if (solveP)
+		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	if (solveP)
+		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
 
 arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &normals_tmp, const double angle_thres)
@@ -1043,7 +1066,7 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 
 	auto *reg_function = new ceres::AutoDiffCostFunction<PoseRegularizer, POSPARAM_NUM, POSPARAM_NUM>
 		(new PoseRegularizer(1.0 / tempbody.nPoints, POSPARAM_NUM));
-    problem.AddResidualBlock(reg_function,NULL,pose);
+	problem.AddResidualBlock(reg_function, NULL, pose);
 
     Solver::Options options;
     options.minimizer_type = ceres::TRUST_REGION;
@@ -1062,11 +1085,7 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
     cout << summary.BriefReport();
 	tSPose += runtime; cSPose += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
-	char tmp[512];
-	sprintf(tmp, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
-	printf(tmp);
-	report += summary.FullReport();
-	report += tmp;
+	logger.log(summary.FullReport()).log(true, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
 void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam,double &scale)
@@ -1113,11 +1132,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 	cout << summary.BriefReport();
 	tSShape += runtime; cSShape += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
-	char tmp[512];
-	sprintf(tmp, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
-	printf(tmp);
-	report += summary.FullReport();
-	report += tmp;
+	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
 uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
@@ -1151,8 +1166,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		t2 = getCurTime();
 		char tmp[256];
 		sprintf(tmp, "cvFLANN uses %lld ms.\n", t2 - t1);
-		printf(tmp);
-		report += tmp;
+		logger.log(tmp, true);
 		if (idxsNNOLD.rows != tempbody.nPoints)
 		{
 			cout << "error of the result of knn search \n";
@@ -1179,8 +1193,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		cMatchNN++; tMatchNN += t2 - t1;
 		char tmp[256];
 		sprintf(tmp, "avxNN uses %lld ms.\n", t2 - t1);
-		printf(tmp);
-		report += tmp;
+		logger.log(tmp, true);
 	}
 
 	//get the normal of the 1-NN point in scan data

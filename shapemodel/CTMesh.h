@@ -154,10 +154,8 @@ public:
 
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
-	void rigidMotionSim(const CVector<CMatrix<float> >& M, const bool smooth = false);
 	void rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
 	void rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
-	void rigidMotionEx(const CVector<CMatrix<float> >& M, CVector<float>& X, const bool smooth = false, const bool force = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);
@@ -191,7 +189,6 @@ public:
 	bool isNeighbor(int i, int j) { return mNeighbor(mJointMap(i), mJointMap(j)); };
 	bool isEndJoint(int aJointID) { return mEndJoint[aJointID]; }
 
-	inline void GetPoint3(const int i, float *__restrict ptr);
 	inline void GetPoint(int i, float& x, float& y, float& z);
 	inline void GetPoint(int i, float& x, float& y, float& z, int& j);
 	inline void GetPoint(int i, float& x, float& y, float& z, float& j);
@@ -360,14 +357,6 @@ inline void CMesh::projectPoint(CMatrix<float>& P, float X, float Y, float Z, fl
 	float invhz = 1.0 / hz;
 	x = hx*invhz;
 	y = hy*invhz;
-}
-
-inline void CMesh::GetPoint3(const int i, float *__restrict ptr)
-{
-	const float *src = mPoints[i].data();
-	*ptr++ = *src++;
-	*ptr++ = *src++;
-	*ptr++ = *src++;
 }
 
 inline void CMesh::GetPoint(int i, float& x, float& y, float& z)

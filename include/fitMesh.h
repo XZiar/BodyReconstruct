@@ -60,6 +60,26 @@ struct CParams
     int nSamplePoints;
 };
 
+class SimpleLog
+{
+private:
+	FILE *fp = nullptr;
+	std::string fname;
+	std::string cache;
+	char tmp[2048];
+public:
+	SimpleLog();
+	~SimpleLog();
+	SimpleLog& log(const std::string& str, const bool isPrint = false);
+	template<typename... Args>
+	SimpleLog& log(const bool isPrint, const char *s, Args... args)
+	{
+		sprintf(tmp, s, args...);
+		return log(tmp, isPrint);
+	}
+	void flush();
+};
+
 class fitMesh
 {
 public:
@@ -71,6 +91,7 @@ public:
 	std::vector<ModelParam> modelParams;
 
 	uint32_t curFrame = 0;
+	SimpleLog logger;
 
 	bool isFastCost = false;
 	bool isAgLimNN = false;
@@ -82,7 +103,6 @@ public:
 	arColIS isValidNN_;
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
-	std::string report;
 
     CParams params;
     arma::mat evectors;//the eigen vetors of the body shape model
