@@ -1016,7 +1016,7 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
 	cout << "optimization finished, close the window to quit\n";
 	if (solveP)
 		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
-	if (solveP)
+	if (solveS)
 		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
 	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
@@ -1175,8 +1175,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		}
 	}
 
-	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S);
-	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1);
+	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S); int *__restrict pidxNN = idxsNN.ptr<int>(0);
+	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1); float *__restrict pdistNN = distNN.ptr<float>(0);
+	float *minDists = new float[scan.nntree.PTCount()];
+	uint8_t *mthCnts = new uint8_t[scan.nntree.PTCount()];
 	{
 		t1 = getCurTime();
 
@@ -1184,10 +1186,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		if (isAgLimNN)
 		{
 			auto tpNorms = armaTOcache(tempbody.normals);
-			scan.nntree.searchOnAngle(&pts[0], &tpNorms[0], tempbody.nPoints, angleLimit, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+			scan.nntree.searchOnAngle(&pts[0], &tpNorms[0], tempbody.nPoints, angleLimit, pidxNN, pdistNN, mthCnts, minDists);
 		}
 		else
-			scan.nntree.search(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
+			scan.nntree.search(&pts[0], tempbody.nPoints, pidxNN, pdistNN);
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
@@ -1198,12 +1200,17 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 
 	//get the normal of the 1-NN point in scan data
 	arma::mat normals_knn(tempbody.nPoints, 3, arma::fill::zeros);
-	const int *__restrict pNN = idxsNN.ptr<int>(0);
-	for (uint32_t i = 0; i < tempbody.nPoints; i++, ++pNN)
+	for (uint32_t i = 0; i < tempbody.nPoints; i++)
 	{
-		const int idx = *pNN;
+		const int idx = pidxNN[i];
 		if (idx > 65530)
 			continue;
+		if (mthCnts[idx] > 3)
+		{
+			//printf("mindist=%f, pdist=%f  when i=%d, idx=%d\n", minDists[idx], pdistNN[i], i, idx);
+			if (minDists[idx] < pdistNN[i])//not mininum
+				continue;
+		}
 		if (idx < 0 || idx > scan.nPoints)
 		{
 			cout << "error idx when copy knn normal\n";
@@ -1212,11 +1219,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		}
 		normals_knn.row(i) = scan.normals.row(idx);//copy the nearest row
 	}
-
 	//chech angles between norms of (the nearest point of scan) AND (object point of tbody)
 	arColIS isValidNN = checkAngle(normals_knn, tempbody.normals, angleLimit);
 	isValidNN = isValidNN % isVisible;
-	
+	delete[] minDists; delete[] mthCnts;
 	uint32_t sumVNN = 0;
 	{
 		auto *pValid = isValidNN.memptr();
