@@ -90,7 +90,6 @@ public:
 	T* allocate(size_t n, const T *hint = 0)
 	{
 		T* ptr = new T[n];
-		//printf("allocate at %llx\n", ptr);
 		return ptr;
 	}
 	void deallocate(T *p, size_t n)

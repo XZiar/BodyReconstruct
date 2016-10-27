@@ -31,16 +31,48 @@ struct CScan
     arma::mat normals_orig;
 };
 
+ALIGN32 struct FastTriangle
+{
+	miniBLAS::Vertex p0, axisu, axisv, norm;
+
+	void* operator new(size_t size)
+	{
+		return malloc_align(size, 32);
+	};
+	void operator delete(void *p)
+	{
+		free_align(p);
+	}
+	void* operator new[](size_t size)
+	{
+		return malloc_align(size, 32);
+	};
+	void operator delete[](void *p)
+	{
+		free_align(p);
+	}
+};
+
 struct CTemplate
 {
     arma::mat points;
-	std::vector<uint32_t> points_idxes;
     arma::mat faces;
-    arma::mat normals;
     arma::mat landmarks;
     arma::mat landmarksIdx;
-    arma::mat meanShape;
     uint32_t nPoints;
+	uint32_t nFaces;
+
+	std::vector<uint16_t> faceCache;
+	std::vector<uint32_t> faceMap;
+	miniBLAS::VertexVec vPts;
+	miniBLAS::VertexVec vNorms;
+	std::vector<FastTriangle, miniBLAS::AlignAllocator<FastTriangle>> vFaces;
+
+	void init(const arma::mat& p, const arma::mat& f);
+	void updPoints();
+	void updPoints(miniBLAS::VertexVec&& pts);
+	void calcFaces();
+	void calcNormals();
 };
 
 struct ModelParam
@@ -86,7 +118,6 @@ public:
 	static CTemplate tempbody;
 	static CShapePose shapepose;
 	static ctools tools;
-	std::vector<uint32_t> tpFaceMap;
 	std::vector<CScan> scanFrames;
 	std::vector<ModelParam> modelParams;
 
@@ -126,13 +157,9 @@ private:
 	void loadTemplate();
 	void loadModel();
 	bool loadScan(CParams& params, CScan& scan);
-	void calculateNormals(const std::vector<uint32_t> &points, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces);
-	void calculateNormalsFaces(arma::mat &points, arma::mat &faces, arma::mat &normals_faces);
-	std::vector<uint32_t> getVertexFacesIdx(int point_idx, arma::mat &faces);
 	void rigidAlignTemplate2ScanPCA(CScan& scanbody);
 	arma::mat rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth);
-	static arma::vec searchShoulder(arma::mat model, const unsigned int lv, 
-		std::vector<double> &widAvg, std::vector<double> &depAvg, std::vector<double> &depMax);
+	static arma::vec searchShoulder(arma::mat model, const uint8_t lv, std::vector<double> &widAvg, std::vector<double> &depAvg, std::vector<double> &depMax);
 	void DirectRigidAlign(CScan& scan);
 	void rigidAlignTemplate2ScanLandmarks();
 	/** @brief fitShapePose
@@ -143,6 +170,7 @@ private:
 	 ** @param angle_thres max angle(in degree) between two norms
 	 **/
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
+	arColIS checkAngle(const miniBLAS::VertexVec& mthNorms, const miniBLAS::VertexVec& tpNorms, const double angle_thres);
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, double &scale);
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam, double &scale);
 	uint32_t updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);

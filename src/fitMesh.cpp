@@ -23,6 +23,70 @@ using miniBLAS::VertexVec;
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
+void CTemplate::init(const arma::mat& p, const arma::mat& f)
+{
+	points = p;
+	nPoints = points.n_rows;
+	updPoints();
+
+	faces = f;
+	nFaces = faces.n_rows;
+	faceCache.resize(faces.n_elem);
+	faceMap.resize(nPoints, UINT32_MAX);
+	const double *px = faces.memptr(), *py = px + nFaces, *pz = py + nFaces;
+	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
+	{
+		auto& tx = faceMap[faceCache[j + 0] = uint16_t(px[i])];
+		if (tx == UINT32_MAX)
+			tx = i;
+		auto& ty = faceMap[faceCache[j + 1] = uint16_t(py[i])];
+		if (ty == UINT32_MAX)
+			ty = i;
+		auto& tz = faceMap[faceCache[j + 2] = uint16_t(pz[i])];
+		if (tz == UINT32_MAX)
+			tz = i;
+	}
+}
+
+void CTemplate::updPoints()
+{
+	vPts.resize(nPoints);
+	const double *__restrict px = points.memptr(), *__restrict py = px + nPoints, *__restrict pz = py + nPoints;
+	for (uint32_t i = 0; i < nPoints; ++i)
+		vPts[i].assign(*px++, *py++, *pz++);
+}
+
+void CTemplate::updPoints(miniBLAS::VertexVec&& pts)
+{
+	vPts = pts;
+	auto *__restrict px = points.memptr(), *__restrict py = px + nPoints, *__restrict pz = py + nPoints;
+	for (uint32_t a = 0; a < nPoints; ++a)
+	{
+		const Vertex tmp = vPts[a];
+		*px++ = tmp.x; *py++ = tmp.y; *pz++ = tmp.z;
+	}
+}
+
+void CTemplate::calcFaces()
+{
+	vFaces.resize(nFaces);
+	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
+	{
+		auto& obj = vFaces[i];
+		obj.p0 = vPts[faceCache[j + 0]];
+		obj.axisu = vPts[faceCache[j + 1]] - obj.p0;
+		obj.axisv = vPts[faceCache[j + 2]] - obj.p0;
+		obj.norm = (obj.axisu * obj.axisv).norm();
+	}
+}
+
+void CTemplate::calcNormals()
+{
+	vNorms.resize(nPoints); 
+	for (uint32_t i = 0; i < nPoints; i++)
+		vNorms[i] = vFaces[faceMap[i]].norm;
+}
+
 
 SimpleLog::SimpleLog()
 {
@@ -50,7 +114,6 @@ void SimpleLog::flush()
 	fprintf(fp, cache.c_str());
 	cache = "";
 }
-
 
 
 static VertexVec armaTOcache(const arma::mat in)
@@ -481,6 +544,18 @@ static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const
         cloud->push_back(color);
     });
 }
+static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const VertexVec& model, const VertexVec& norm, pcl::PointXYZRGB color)
+{
+	const uint32_t cnt = std::min(model.size(), norm.size());
+	for (uint32_t i = 0; i < cnt; ++i)
+	{
+		const Vertex& pt = model[i];
+		const auto y = norm[i].y;
+		color.b = (uint8_t)(y * 32 + (y > 0 ? 255 - 32 : 32));
+		color.x = pt.x; color.y = pt.y; color.z = pt.z;
+		cloud->push_back(color);
+	}
+}
 
 static cv::Mat armaTOcv(const arma::mat in)
 {
@@ -623,54 +698,26 @@ bool fitMesh::loadScan(CParams& params, CScan& scan)
   */
 void fitMesh::loadTemplate()
 {
-    arma::mat faces;
-	faces.load(dataDir + "faces.mat");
-    cout<<"Template faces loaded: "<<faces.n_rows<<","<<faces.n_cols<<endl;
-    tempbody.faces = faces-1;
+	arma::mat pts;
+	//template.mat should be pre-calculated : meanshape.mat-mean(meanshape)
+	pts.load(dataDir + "template.mat");
+	cout << "Template points loaded: " << pts.n_rows << "," << pts.n_cols << endl;
 	
-    arma::mat landmarksIdxes;
-    landmarksIdxes.load(dataDir+"landmarksIdxs73.mat");
-//    cout<<"Landmark indexes loaded: "<<landmarksIdxes.n_rows<<endl;
-    tempbody.landmarksIdx = landmarksIdxes;
-//    cout<<"loading mean shape..."<<endl;
-    tempbody.meanShape.load(dataDir+"meanShape.mat");
-//    cout<<"mean shape loaded, size is: "<<tempbody.meanShape.n_rows<<", "<<tempbody.meanShape.n_cols<<endl;
-	tempbody.points = tempbody.meanShape.each_row() - mean(tempbody.meanShape);
-	//tempbody.shape_params = zeros(1, params.nPCA);
-	//tempbody.pose_params = zeros(1, params.nPose);
-    tempbody.points_idxes.clear();
-    tempbody.nPoints = tempbody.points.n_rows;
-	//useless, just use an increasing idx
-	//for (uint32_t i = 0; i < tempbody.nPoints; i++)
-    //    tempbody.points_idxes.push_back(i);
-    
-	//prepare tpFaceMap
-	{
-		tpFaceMap.clear();
-		tpFaceMap.assign(tempbody.nPoints, UINT32_MAX);
-		const double *px = tempbody.faces.memptr(), *py = px + faces.n_rows, *pz = py + faces.n_rows;
-		for (uint32_t i = 0; i < faces.n_rows; ++i)
-		{
-			auto& tx = tpFaceMap[uint32_t(px[i])];
-			if (tx == UINT32_MAX)
-				tx = i;
-			auto& ty = tpFaceMap[uint32_t(py[i])];
-			if (ty == UINT32_MAX)
-				ty = i; 
-			auto& tz = tpFaceMap[uint32_t(pz[i])];
-			if (tz == UINT32_MAX)
-				tz = i;
-		}
-	}
-    isVisible = ones<arColIS>(tempbody.points.n_rows);
-//    arma::mat mshape = mean(tempbody.points);
-//    for(int i=0;i<tempbody.nPoints;i++)
-//    {
-//        if(tempbody.points(i,1)>mshape(0,2)+10)
-//        {
-//            isVisible(i,0) = 1;
-//        }
-//    }
+	arma::mat faces;
+	faces.load(dataDir + "faces.mat");
+	cout << "Template faces loaded: " << faces.n_rows << "," << faces.n_cols << endl;
+	//face index starts from 1
+	faces -= 1;
+
+	arma::mat landmarksIdxes;
+	landmarksIdxes.load(dataDir + "landmarksIdxs73.mat");
+	//    cout<<"Landmark indexes loaded: "<<landmarksIdxes.n_rows<<endl;
+	tempbody.landmarksIdx = landmarksIdxes;
+
+	tempbody.init(pts, faces);
+	tempbody.calcFaces();
+	
+    isVisible = ones<arColIS>(tempbody.nPoints);
 }
 
 /** @brief loadModel
@@ -679,100 +726,19 @@ void fitMesh::loadTemplate()
   */
 void fitMesh::loadModel()
 {
-	/*
-    evectors.load(dataDir+"evectors_bin.mat");
-    cout<<"size of the eigen vectors: "<<evectors.n_rows<<", "<<evectors.n_cols<<endl;
-    evectors = evectors.rows(0,params.nPCA-1);
-    evectors.save(dataDir+"reduced_evectors.mat",arma::arma_binary);
-	*/
     cout<<"loading eigen vectors...\n";
 	evectors.load(dataDir + "reduced_evectors.mat");
 	cout << "eigen vectors loaded, size is: " << evectors.n_rows << "," << evectors.n_cols << endl;
 
     cout<<"loading eigen values...\n";
 	evalues.load(dataDir + "evalues.mat");
-    evalues = evalues.cols(0,params.nPCA-1);
+	evalues = evalues.cols(0, params.nPCA - 1);
 	cout << "eigen values loaded, size is: " << evalues.n_rows << "," << evalues.n_cols << endl;
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
 }
 
-void fitMesh::calculateNormals(const vector<uint32_t> &points_idxes, arma::mat &faces, arma::mat &normals, arma::mat &normals_faces)
-{
-    //points_idxes is the indexes of the points that sampled frome the scan,how ever the normals are computed from all scan
-    //points with triangle faces, so the sampled indexes is needed
-	if (faces.n_rows <= 0)
-    {
-        normals = normals.zeros(tempbody.nPoints,3);
-        return;
-    }
-
-    normals = normals.zeros(tempbody.nPoints,3);
-
-	uint32_t idx = 0;
-    normals.each_row([&](arma::rowvec& row)
-    {
-		const auto ret = tpFaceMap[idx++];
-		if (ret != UINT32_MAX)
-			row = normals_faces.row(ret);
-		else
-			;//row.zeros(1,3);//row = normal_tmp.zeros(1,3);
-		/*
-        const auto& facesPointIdx = getVertexFacesIdx(points_idxes[idx++], faces);
-        if (facesPointIdx.empty())
-            ;//row = normal_tmp.zeros(1,3);
-        else
-            row = normals_faces.row(facesPointIdx[0]);
-		*/
-    });
-}
-
-void fitMesh::calculateNormalsFaces(arma::mat &points, arma::mat &faces, arma::mat &normals_faces)
-{
-	uint32_t nFaces = faces.n_rows;
-    //cout<<"faces number: "<<nFaces<<", "<<points.n_rows<<endl;
-	normals_faces.zeros(nFaces, 3);
-
-    //cout<<"normals_faces size: "<<normals_faces.n_rows<<", "<<normals_faces.n_cols<<endl;
-    //points.save("pointssm.txt",raw_ascii);
-	for (uint32_t i = 0; i < nFaces; i++)
-    {
-        const arma::rowvec base = points.row(faces(i,0));
-        const arma::rowvec edge1 = base - points.row(faces(i,1));
-        const arma::rowvec edge2 = base - points.row(faces(i,2));
-		normals_faces.row(i) = arma::cross(edge1, edge2);
-    }
-    //normals_faces.save("notnormals.txt",raw_ascii);
-    /*
-    arma::mat l = sqrt(sum(normals_faces%normals_faces,1));
-    l = arma::repmat(l,1,3);
-    normals_faces = normals_faces/l;
-    */
-	normals_faces = arma::normalise(normals_faces, 2, 1);
-}
-
-vector<uint32_t> fitMesh::getVertexFacesIdx(int point_idx, arma::mat &faces)
-{
-   vector<uint32_t> pointFacesIdx;
-   for (uint32_t i = 0; i < faces.n_rows; i++)
-   {
-       if(faces(i,0)==point_idx)
-       {
-           pointFacesIdx.push_back(i);
-       }
-       if(faces(i,1)==point_idx)
-       {
-           pointFacesIdx.push_back(i);
-       }
-       if(faces(i,2)==point_idx)
-       {
-           pointFacesIdx.push_back(i);
-       }
-   }
-   return pointFacesIdx;
-}
-
-arma::vec fitMesh::searchShoulder(arma::mat model, const unsigned int lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
+arma::vec fitMesh::searchShoulder(arma::mat model, const uint8_t lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
 {
     arma::mat max_m = max(model,0);
     arma::mat min_m = min(model,0);
@@ -933,12 +899,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     if(true)
     {
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-		{
-			arma::mat normals_faces;
-			calculateNormalsFaces(tempbody.points, tempbody.faces, normals_faces);
-			calculateNormals(tempbody.points_idxes, tempbody.faces, tempbody.normals, normals_faces);
-		}
-		showPoints(cloud, tempbody.points, tempbody.normals, pcl::PointXYZRGB(0, 192, 0));
+		tempbody.calcNormals();
+		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
 		showPoints(cloud, scanbody.points, scanbody.normals, pcl::PointXYZRGB(192, 0, 0));
         viewer.showCloud(cloud);
     }
@@ -1040,6 +1002,20 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
     }
     return result;
 }
+arColIS fitMesh::checkAngle(const miniBLAS::VertexVec& mthNorms, const miniBLAS::VertexVec& tpNorms, const double angle_thres)
+{
+	const uint32_t rowcnt = mthNorms.size();
+	arColIS result(rowcnt, arma::fill::ones);
+
+	const float mincos = cos(3.1415926 * angle_thres / 180);
+
+	auto *__restrict pRes = result.memptr();
+	for (uint32_t i = 0; i < rowcnt; i++)
+	{
+		*pRes++ = (mthNorms[i] % tpNorms[i]) >= mincos ? 1 : 0;
+	}
+	return result;
+}
 
 void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, double &scale)
 {
@@ -1137,22 +1113,9 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 
 uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err)
 {
-	auto pts = shapepose.getModelFast(curMParam.shape, curMParam.pose);
-	{
-		auto *px = tempbody.points.memptr(), *py = px + tempbody.nPoints, *pz = py + tempbody.nPoints;
-		for (uint32_t a = 0; a < tempbody.nPoints; ++a)
-		{
-			const Vertex tmp = pts[a] * scale;
-			*px++ = tmp.x;
-			*py++ = tmp.y;
-			*pz++ = tmp.z;
-		}
-	}
-	{
-		arma::mat normals_faces;
-		calculateNormalsFaces(tempbody.points, tempbody.faces, normals_faces);
-		calculateNormals(tempbody.points_idxes, tempbody.faces, tempbody.normals, normals_faces);
-	}
+	tempbody.updPoints(shapepose.getModelFast(curMParam.shape, curMParam.pose));
+	tempbody.calcFaces();
+	tempbody.calcNormals();
 
 	uint64_t t1, t2;
 	cv::Mat idxsNNOLD(1, 1, CV_32S);
@@ -1182,14 +1145,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 	{
 		t1 = getCurTime();
 
-		//scan.nntree.searchOld(&pts[0], tempbody.nPoints, idxsNN.ptr<int>(0), distNN.ptr<float>(0));
 		if (isAgLimNN)
-		{
-			auto tpNorms = armaTOcache(tempbody.normals);
-			scan.nntree.searchOnAngle(&pts[0], &tpNorms[0], tempbody.nPoints, angleLimit, pidxNN, pdistNN, mthCnts, minDists);
-		}
+			scan.nntree.searchOnAngle(&tempbody.vPts[0], &tempbody.vNorms[0], tempbody.nPoints, angleLimit, pidxNN, pdistNN, mthCnts, minDists);
 		else
-			scan.nntree.search(&pts[0], tempbody.nPoints, pidxNN, pdistNN);
+			scan.nntree.search(&tempbody.vPts[0], tempbody.nPoints, pidxNN, pdistNN);
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
@@ -1199,7 +1158,8 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 	}
 
 	//get the normal of the 1-NN point in scan data
-	arma::mat normals_knn(tempbody.nPoints, 3, arma::fill::zeros);
+	VertexVec mthNorms(tempbody.nPoints);
+	memset(&mthNorms[0], 0x0, tempbody.nPoints * sizeof(Vertex));
 	for (uint32_t i = 0; i < tempbody.nPoints; i++)
 	{
 		const int idx = pidxNN[i];
@@ -1217,10 +1177,11 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 			cin.ignore();
 			continue;
 		}
-		normals_knn.row(i) = scan.normals.row(idx);//copy the nearest row
+		const arma::rowvec obj = scan.normals.row(idx);
+		mthNorms[i].assign(obj[0], obj[1], obj[2]);
 	}
 	//chech angles between norms of (the nearest point of scan) AND (object point of tbody)
-	arColIS isValidNN = checkAngle(normals_knn, tempbody.normals, angleLimit);
+	arColIS isValidNN = checkAngle(mthNorms, tempbody.vNorms, angleLimit);
 	isValidNN = isValidNN % isVisible;
 	delete[] minDists; delete[] mthCnts;
 	uint32_t sumVNN = 0;
@@ -1267,8 +1228,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 			fwrite(name, sizeof(name), 1, fp);
 			cnt = tempbody.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);
-			auto tp = armaTOcache(tempbody.points);
-			fwrite(&tp[0], sizeof(Vertex), cnt, fp);
+			fwrite(&tempbody.vPts[0], sizeof(Vertex), cnt, fp);
 		}
 		if (useFLANN)
 		{
@@ -1320,7 +1280,7 @@ void fitMesh::showResult(const CScan& scan, const bool isNN)
     if(isNN)
     {
 		const auto colors_rd = arma::randi<arma::Mat<uint8_t>>(scan.points.n_rows, 3, arma::distr_param(0, 255));
-        for(uint32_t i=0; i<tempbody.points.n_rows; i++)
+        for(uint32_t i=0; i<tempbody.nPoints; i++)
         {
             const auto& cl = colors_rd.row(i);
             pcl::PointXYZRGB tmp_pt(cl(0), cl(1), cl(2));
@@ -1338,7 +1298,7 @@ void fitMesh::showResult(const CScan& scan, const bool isNN)
     else
     {
 		//show templete points
-		showPoints(cloud, tempbody.points, tempbody.normals, pcl::PointXYZRGB(0, 192, 0));
+		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
     }
 	viewer.showCloud(cloud);
 }
