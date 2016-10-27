@@ -28,27 +28,25 @@ void kdNNTree::init(const arma::mat& points)
 	}
 	ptCount = points.n_rows;
 }
-void kdNNTree::init(const arma::mat& points, const arma::mat& normals)
+void kdNNTree::init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints)
 {
 	for (auto& t : tree)
 	{
 		t.clear();
-		t.reserve(points.n_rows / 8);
+		t.reserve(nPoints / 8);
 	}
 	for (auto& t : ntree)
 	{
 		t.clear();
-		t.reserve(normals.n_rows / 8);
+		t.reserve(nPoints / 8);
 	}
 
-	const double *__restrict px = points.memptr(), *__restrict py = px + points.n_rows, *__restrict pz = py + points.n_rows;
-	const double *__restrict nx = normals.memptr(), *__restrict ny = nx + normals.n_rows, *__restrict nz = ny + normals.n_rows;
-	for (uint32_t i = 0; i < points.n_rows; ++i)
+	for (uint32_t i = 0; i < nPoints; ++i)
 	{
-		const Vertex v(*px++, *py++, *pz++, (int32_t)i);
+		Vertex v = points[i]; v.int_w = i;
 		const auto tid = judgeIdx(v);
 		tree[tid].push_back(v);
-		ntree[tid].push_back(Vertex(*nx++, *ny++, *nz++));
+		ntree[tid].push_back(normals[i]);
 	}
 
 	const Vertex empty(1e10f, 1e10f, 1e10f);
@@ -63,7 +61,7 @@ void kdNNTree::init(const arma::mat& points, const arma::mat& normals)
 		for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
 			t.push_back(empty);
 	}
-	ptCount = points.n_rows;
+	ptCount = nPoints;
 }
 
 void kdNNTree::searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const

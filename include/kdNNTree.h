@@ -24,7 +24,8 @@ public:
 	kdNNTree() = default;
 	~kdNNTree() = default;
 	void init(const arma::mat& points);
-	void init(const arma::mat& points, const arma::mat& normals);
+	//void init(const arma::mat& points, const arma::mat& normals);
+	void init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints);
 	void searchBasic(const Vertex *pVert, const uint32_t count, int *idxs, float *dists) const;
 	void searchOld(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
 	void search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;

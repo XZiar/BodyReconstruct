@@ -23,6 +23,21 @@ using miniBLAS::VertexVec;
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
+
+void CScan::prepare()
+{
+	vPts.resize(nPoints); vNorms.resize(nPoints);
+
+	const double *__restrict px = points.memptr(), *__restrict py = px + nPoints, *__restrict pz = py + nPoints;
+	const double *__restrict pnx = normals.memptr(), *__restrict pny = pnx + nPoints, *__restrict pnz = pny + nPoints;
+	for (uint32_t i = 0; i < nPoints; ++i)
+	{
+		vPts[i].assign(*px++, *py++, *pz++);
+		vNorms[i].assign(*pnx++, *pny++, *pnz++);
+	}
+}
+
+
 void CTemplate::init(const arma::mat& p, const arma::mat& f)
 {
 	points = p;
@@ -141,19 +156,21 @@ static VertexVec armaTOcache(const arma::mat in, const uint32_t *idx, const uint
 	}
 	return cache;
 }
-static VertexVec armaTOcache(const arma::mat in, const uint32_t *idx, const char *mask, const uint32_t cnt)
+static VertexVec shuffleANDfilter(const VertexVec& in, const uint32_t cnt, const uint32_t *idx, const char *mask = nullptr)
 {
 	VertexVec cache;
-	cache.reserve(cnt / 2);
-
-	const double *__restrict px = in.memptr(), *__restrict py = in.memptr() + in.n_rows, *__restrict pz = in.memptr() + 2 * in.n_rows;
-	for (uint32_t i = 0, outi = 0; i < cnt; ++i)
+	if (mask != nullptr)
 	{
-		if (mask[i] != 0)
-		{
-			const uint32_t off = idx[i];
-			cache.push_back(Vertex(px[off], py[off], pz[off]));
-		}
+		cache.reserve(cnt / 2);
+		for (uint32_t i = 0; i < cnt; ++i)
+			if (mask[i] != 0)
+				cache.push_back(in[idx[i]]);
+	}
+	else
+	{
+		cache.resize(cnt);
+		for (uint32_t i = 0; i < cnt; ++i)
+			cache[i] = in[idx[i]];
 	}
 	return cache;
 }
@@ -616,7 +633,7 @@ void fitMesh::loadLandmarks()
   *
   * @todo: document this function
   */
-bool fitMesh::loadScan(CParams& params, CScan& scan)
+bool fitMesh::loadScan(CScan& scan)
 {
 	PointCloudT::Ptr cloud_tmp(new PointCloudT);
 	pcl::PolygonMesh mesh;
@@ -668,26 +685,21 @@ bool fitMesh::loadScan(CParams& params, CScan& scan)
 	//no faces will be loaded, and the normals are calculated when sampling the scan datas
 	if (scan.nPoints <= params.nSamplePoints)//Not sample the scan points
 	{
-		params.nSamplePoints = scan.nPoints;
 		scan.sample_point_idxes.clear();
-		for (uint32_t i = 0; i < scan.nPoints; i++)
-		{
-			scan.sample_point_idxes.push_back(i);
-		}
 		scan.points = scan.points_orig;
 		scan.normals = scan.normals_orig;
 	}
 	else//sample the scan points if necessary;
 	{
 		scan.sample_point_idxes = tools.randperm(scan.nPoints, params.nSamplePoints);
-		scan.points = arma::zeros(params.nSamplePoints, 3);
-		scan.normals = arma::zeros(params.nSamplePoints, 3);
+		scan.nPoints = params.nSamplePoints;
+		scan.points = arma::zeros(scan.nPoints, 3);
+		scan.normals = arma::zeros(scan.nPoints, 3);
 		for (uint32_t i = 0; i < params.nSamplePoints; i++)
 		{
 			scan.points.row(i) = scan.points_orig.row(scan.sample_point_idxes[i]);
 			scan.normals.row(i) = scan.normals_orig.row(scan.sample_point_idxes[i]);
 		}
-		scan.nPoints = params.nSamplePoints;
 	}
 	return true;
 }
@@ -726,37 +738,37 @@ void fitMesh::loadTemplate()
   */
 void fitMesh::loadModel()
 {
-    cout<<"loading eigen vectors...\n";
+    //cout<<"loading eigen vectors...\n";
 	evectors.load(dataDir + "reduced_evectors.mat");
-	cout << "eigen vectors loaded, size is: " << evectors.n_rows << "," << evectors.n_cols << endl;
+	cout << "eigen vectors loaded: " << evectors.n_rows << "," << evectors.n_cols << endl;
 
-    cout<<"loading eigen values...\n";
+    //cout<<"loading eigen values...\n";
 	evalues.load(dataDir + "evalues.mat");
 	evalues = evalues.cols(0, params.nPCA - 1);
-	cout << "eigen values loaded, size is: " << evalues.n_rows << "," << evalues.n_cols << endl;
+	cout << "eigen values loaded: " << evalues.n_rows << "," << evalues.n_cols << endl;
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
 }
 
-arma::vec fitMesh::searchShoulder(arma::mat model, const uint8_t lv, vector<double> &widAvg, vector<double> &depAvg, vector<double> &depMax)
+arma::vec fitMesh::searchShoulder(const arma::mat& model, const uint32_t level, vector<double>& widAvg, vector<double>& depAvg, vector<double>& depMax)
 {
-    arma::mat max_m = max(model,0);
-    arma::mat min_m = min(model,0);
-    double height = max_m(2) - min_m(2);
-    double width = max_m(0) - min_m(0);
-    double top = max_m(2);
-    double step = height / lv;
-    vector<int> lvCnt(lv + 1, 0);
+	const arma::mat max_m = max(model,0);
+	const arma::mat min_m = min(model,0);
+    const double height = max_m(2) - min_m(2);
+	const double width = max_m(0) - min_m(0);
+	const double top = max_m(2);
+	const double step = height / level;
+    vector<int> lvCnt(level + 1, 0);
     model.each_row([&](const arma::rowvec& col)
     {
-       unsigned int level = (unsigned int)((top - col(2)) / step);
-       if(col(1) < depMax[level])//compare front(toward negtive)
-           depMax[level] = col(1);
-       widAvg[level] += abs(col(0));
-       depAvg[level] += col(1);
-       lvCnt[level]++;
+		uint8_t level = (uint8_t)((top - col(2)) / step);
+		if(col(1) < depMax[level])//compare front(toward negtive)
+			depMax[level] = col(1);
+		widAvg[level] += abs(col(0));
+		depAvg[level] += col(1);
+		lvCnt[level]++;
     });
-    for(unsigned int a=0; a <= lv; ++a)
+	for (uint32_t a = 0; a <= level; ++a)
     {
         if(lvCnt[a] == 0)
             widAvg[a] = 0;
@@ -771,11 +783,12 @@ arma::vec fitMesh::searchShoulder(arma::mat model, const uint8_t lv, vector<doub
 
 arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth)
 {
+	//res = {tObjHei, tAvgDep[a], sAvgDep[a]/sST, tMaxDep[a], sMaxDep[a]/sST};
 	arma::vec res(5, arma::fill::ones);
     {
-        const int lv = 64;
-        vector<double> sAvgWid(lv+1,0), sAvgDep(lv+1,0), sMaxDep(lv+1,0);
-        vector<double> tAvgWid(lv+1,0), tAvgDep(lv+1,0), tMaxDep(lv+1,0);
+        const uint32_t lv = 64;
+		vector<double> sAvgWid(lv + 1, 0), sAvgDep(lv + 1, 0), sMaxDep(lv + 1, 0);
+		vector<double> tAvgWid(lv + 1, 0), tAvgDep(lv + 1, 0), tMaxDep(lv + 1, 0);
         arma::vec sret = searchShoulder(input*R, lv, sAvgWid, sAvgDep, sMaxDep);
         arma::vec tret = searchShoulder(tempbody.points, lv, tAvgWid, tAvgDep, tMaxDep);
 
@@ -795,17 +808,14 @@ arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, dou
                 res = {tObjHei, tAvgDep[a], sAvgDep[a]/sST, tMaxDep[a], sMaxDep[a]/sST};
                 break;
             }
-            //printf("^mismatch lv %d : %f AND %f\n", a, sAvgWid[a], tAvgWid[a]);
         }
     }
-
-    printMat("#Shoulder-res:",res);
     dDepth += (res(3) - res(4))/2;
     double tanOri = res(2) / res(0), tanObj = (res(1) + res(3) - res(4)) / res(0);
 
     double cosx = (1 + tanOri*tanObj)/( sqrt(1+tanOri*tanOri) * sqrt(1+tanObj*tanObj) );
     double sinx = sqrt(1- cosx*cosx);
-    printf("rotate: sinx=%7f, cosx=%7f\n",sinx,cosx);
+    printf("rotate: sinx=%f, cosx=%f\n",sinx,cosx);
     arma::mat Rmat(3, 3, arma::fill::zeros);
     Rmat(0,0) = 1;
     Rmat(1,1) = Rmat(2,2) = cosx;
@@ -880,6 +890,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     T.submat(0,0,2,2) = R/s;
     T(3,3) = 1;
     T.submat(0,3,2,3) = meanpoints.t();
+	scanbody.T = T;
+
     //Translate the landmarks
     if(!scanbody.landmarks.empty())
     {
@@ -891,9 +903,9 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     {
         scanbody.normals *= R;
     }
-    scanbody.T = T;
 
-	scanbody.nntree.init(scanbody.points, scanbody.normals);
+	scanbody.prepare();
+	scanbody.nntree.init(scanbody.vPts, scanbody.vNorms, scanbody.nPoints);
 
     //show the initial points
     if(true)
@@ -901,7 +913,7 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 		tempbody.calcNormals();
 		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
-		showPoints(cloud, scanbody.points, scanbody.normals, pcl::PointXYZRGB(192, 0, 0));
+		showPoints(cloud, scanbody.vPts, scanbody.vNorms, pcl::PointXYZRGB(192, 0, 0));
         viewer.showCloud(cloud);
     }
 }
@@ -921,7 +933,9 @@ void fitMesh::DirectRigidAlign(CScan& scan)
 
 	scan.points.each_row() += totalShift;
 	//prepare nn-tree
-	scan.nntree.init(scan.points, scan.normals);
+	scan.prepare();
+	scan.nntree.init(scan.vPts, scan.vNorms, scan.nPoints);
+	//scan.nntree.init(scan.points, scan.normals);
 }
 
 void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solveS, uint32_t iter)
@@ -953,8 +967,8 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
 	{
         errPrev = err;//update the error
 		const auto scanCache = isFastCost ? 
-			armaTOcache(scan.points, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr(), idxsNN_.rows) :
-			armaTOcache(scan.points, idxsNN_.ptr<uint32_t>(), idxsNN_.rows);
+			shuffleANDfilter(scan.vPts, tempbody.nPoints, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr()) :
+			shuffleANDfilter(scan.vPts, tempbody.nPoints, idxsNN_.ptr<uint32_t>());
 		if(isFastCost)
 			shapepose.preCompute(isValidNN_.memptr());
 		if (solveP)
@@ -1177,32 +1191,28 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 			cin.ignore();
 			continue;
 		}
-		const arma::rowvec obj = scan.normals.row(idx);
+		const arma::rowvec& obj = scan.normals.row(idx);
 		mthNorms[i].assign(obj[0], obj[1], obj[2]);
 	}
 	//chech angles between norms of (the nearest point of scan) AND (object point of tbody)
 	arColIS isValidNN = checkAngle(mthNorms, tempbody.vNorms, angleLimit);
 	isValidNN = isValidNN % isVisible;
 	delete[] minDists; delete[] mthCnts;
-	uint32_t sumVNN = 0;
-	{
-		auto *pValid = isValidNN.memptr();
-		for (uint32_t a = 0; a++ < isValidNN.n_rows; ++pValid)
-			sumVNN += *pValid;
-		printf("valid nn number is: %d\n", sumVNN);
-	}
 
+	uint32_t sumVNN = 0;
 	{//caculate total error
 		float distAll = 0;
-		auto pValid = isValidNN.memptr();
-		const float *pDist = distNN.ptr<float>(0);
-		for (uint32_t i = 0; i < tempbody.nPoints; ++i, ++pValid, ++pDist)
+		const auto pValid = isValidNN.memptr();
+		for (uint32_t i = 0; i < tempbody.nPoints; ++i)
 		{
-			if (*pValid && !isnan(*pDist))
-				distAll += *pDist;
+			if (pValid[i])
+			{
+				sumVNN++;
+				distAll += pdistNN[i];
+			}
 		}
 		err = distAll;
-		cout << "the error is:" << err << endl;
+		printf("valid nn number: %d , total error: %f\n", sumVNN, err);
 	}
 
 	//if(false)
@@ -1218,8 +1228,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 			fwrite(name, sizeof(name), 1, fp);
 			cnt = scan.nPoints;
 			fwrite(&cnt, sizeof(cnt), 1, fp);
-			auto sc = armaTOcache(scan.points);
-			fwrite(&sc[0], sizeof(Vertex), cnt, fp);
+			fwrite(&scan.vPts[0], sizeof(Vertex), cnt, fp);
 		}
 		{
 			type = 0;
@@ -1276,10 +1285,10 @@ void fitMesh::showResult(const CScan& scan, const bool isNN)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 	//show scan points
-	showPoints(cloud, scan.points, scan.normals, pcl::PointXYZRGB(192, 0, 0));
+	showPoints(cloud, scan.vPts, scan.vNorms, pcl::PointXYZRGB(192, 0, 0));
     if(isNN)
     {
-		const auto colors_rd = arma::randi<arma::Mat<uint8_t>>(scan.points.n_rows, 3, arma::distr_param(0, 255));
+		const auto colors_rd = arma::randi<arma::Mat<uint8_t>>(scan.nPoints, 3, arma::distr_param(0, 255));
         for(uint32_t i=0; i<tempbody.nPoints; i++)
         {
             const auto& cl = colors_rd.row(i);
@@ -1316,7 +1325,7 @@ void fitMesh::mainProcess()
 	scanFrames.clear();
 	scanFrames.push_back(CScan());
 	CScan& firstScan = scanFrames.back();
-	loadScan(params, firstScan);
+	loadScan(firstScan);
 	rigidAlignTemplate2ScanPCA(firstScan);
 	fitShapePose(firstScan);
 	modelParams.push_back(curMParam);
@@ -1329,7 +1338,7 @@ void fitMesh::mainProcess()
 		curFrame += 1;
 		scanFrames.push_back(CScan());
 		CScan& curScan = scanFrames.back();
-		if (!loadScan(params, curScan))
+		if (!loadScan(curScan))
 			break;
 		//rigid align the scan
 		DirectRigidAlign(curScan);

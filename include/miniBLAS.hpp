@@ -71,6 +71,28 @@ inline __m256 Mat3x3_Mul2_Vec3(const __m128 ma0, const __m128 ma1, const __m128 
 }
 
 
+template<uint32_t N>
+struct AlignBase
+{
+	void* operator new(size_t size)
+	{
+		return malloc_align(size, N);
+	};
+	void operator delete(void *p)
+	{
+		free_align(p);
+	}
+	void* operator new[](size_t size)
+	{
+		return malloc_align(size, N);
+	};
+	void operator delete[](void *p)
+	{
+		free_align(p);
+	}
+};
+
+
 template<class T>
 struct AlignAllocator : std::allocator<T>
 {
@@ -108,7 +130,7 @@ class ALIGN16 VertexI;
 
 static const uint32_t Vec4Align = 32;
 template<typename T>
-class ALIGN16 Vec4Base
+class ALIGN16 Vec4Base : public AlignBase<Vec4Align>
 {
 	static_assert(sizeof(T) == 4, "only 4-byte length type allowed");
 protected:
@@ -136,24 +158,6 @@ protected:
 	Vec4Base(const T x_, const T y_) :x(x_), y(y_) { };
 	Vec4Base(const T x_, const T y_, const T z_) :x(x_), y(y_), z(z_) { };
 	Vec4Base(const T x_, const T y_, const T z_, const T w_) :x(x_), y(y_), z(z_), w(w_) { };
-
-public:
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, Vec4Align);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
-	void* operator new[](size_t size)
-	{
-		return malloc_align(size, Vec4Align);
-	};
-	void operator delete[](void *p)
-	{
-		free_align(p);
-	}
 };
 
 
@@ -341,7 +345,7 @@ public:
 
 static const uint32_t SQMat4Align = 32;
 template<typename T, typename T2>
-class ALIGN32 SQMat4Base
+class ALIGN32 SQMat4Base : public AlignBase<SQMat4Align>
 {
 	static_assert(sizeof(T) == 16, "only 16-byte length type(for a row) allowed");
 	static_assert(sizeof(T2) == 32, "T2 should be twice of T");
@@ -388,23 +392,6 @@ protected:
 	SQMat4Base(const T2 xy_) :xy(xy_) { };
 	SQMat4Base(const T2 xy_, const T z_) :xy(xy_), z(z_) { };
 	SQMat4Base(const T2 xy_, const T2 zw_) :xy(xy_), zw(zw_) { };
-public:
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, SQMat4Align);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
-	void* operator new[](size_t size)
-	{
-		return malloc_align(size, SQMat4Align);
-	};
-	void operator delete[](void *p)
-	{
-		free_align(p);
-	}
 };
 
 using __m128x4 = __m128[4];

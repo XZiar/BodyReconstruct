@@ -13,8 +13,22 @@ using arColIS = arma::Col<char>;
 void printMat(const char *str, arma::mat m);
 void printMatAll(const char * str, arma::mat m);
 
-struct CScan
+ALIGN32 struct FastTriangle : public miniBLAS::AlignBase<32>
 {
+	miniBLAS::Vertex p0, axisu, axisv, norm;
+};
+
+struct CBaseModel
+{
+	miniBLAS::VertexVec vPts;
+	miniBLAS::VertexVec vNorms;
+	uint32_t nPoints;
+};
+
+struct CScan : public CBaseModel
+{
+	arma::mat points_orig;
+	arma::mat normals_orig;
     arma::mat points;
     arma::mat faces;
     arma::mat pose_params;
@@ -24,48 +38,22 @@ struct CScan
     arma::mat landmarks;
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
-    uint32_t nPoints;
     cv::flann::Index *kdtree;
 	miniBLAS::kdNNTree nntree;
-    arma::mat points_orig;
-    arma::mat normals_orig;
+
+	void prepare();
 };
 
-ALIGN32 struct FastTriangle
-{
-	miniBLAS::Vertex p0, axisu, axisv, norm;
-
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, 32);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
-	void* operator new[](size_t size)
-	{
-		return malloc_align(size, 32);
-	};
-	void operator delete[](void *p)
-	{
-		free_align(p);
-	}
-};
-
-struct CTemplate
+struct CTemplate : public CBaseModel
 {
     arma::mat points;
     arma::mat faces;
     arma::mat landmarks;
     arma::mat landmarksIdx;
-    uint32_t nPoints;
 	uint32_t nFaces;
 
 	std::vector<uint16_t> faceCache;
 	std::vector<uint32_t> faceMap;
-	miniBLAS::VertexVec vPts;
-	miniBLAS::VertexVec vNorms;
 	std::vector<FastTriangle, miniBLAS::AlignAllocator<FastTriangle>> vFaces;
 
 	void init(const arma::mat& p, const arma::mat& f);
@@ -156,10 +144,11 @@ private:
 
 	void loadTemplate();
 	void loadModel();
-	bool loadScan(CParams& params, CScan& scan);
+	bool loadScan(CScan& scan);
 	void rigidAlignTemplate2ScanPCA(CScan& scanbody);
 	arma::mat rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth);
-	static arma::vec searchShoulder(arma::mat model, const uint8_t lv, std::vector<double> &widAvg, std::vector<double> &depAvg, std::vector<double> &depMax);
+	static arma::vec searchShoulder(const arma::mat& model, const uint32_t level,
+		std::vector<double>& widAvg, std::vector<double>& depAvg, std::vector<double>& depMax);
 	void DirectRigidAlign(CScan& scan);
 	void rigidAlignTemplate2ScanLandmarks();
 	/** @brief fitShapePose
