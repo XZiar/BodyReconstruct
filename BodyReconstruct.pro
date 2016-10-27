@@ -8,7 +8,6 @@ CONFIG += link_pkgconfig
 OBJECTS_DIR = ./obj
 
 SOURCES += main.cpp \
-	src/kdNNTree.cpp \
     src/tools.cpp \
     src/fitMesh.cpp \
     shapemodel/cshapepose.cpp \
@@ -20,7 +19,7 @@ SOURCES += main.cpp \
 
 HEADERS += main.h \
 	include/miniBLAS.hpp \
-	include/kdNNTree.h \
+	include/kdNNTree.hpp \
     include/tools.h \
     include/fitMesh.h \
     shapemodel/cshapepose.h \

@@ -51,9 +51,6 @@
     <ClCompile Include="src\fitMesh.cpp">
       <Filter>源文件\src</Filter>
     </ClCompile>
-    <ClCompile Include="src\kdNNTree.cpp">
-      <Filter>源文件\src</Filter>
-    </ClCompile>
     <ClCompile Include="src\tools.cpp">
       <Filter>源文件\src</Filter>
     </ClCompile>
@@ -66,9 +63,6 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\fitMesh.h">
-      <Filter>头文件\include</Filter>
-    </ClInclude>
-    <ClInclude Include="include\kdNNTree.h">
       <Filter>头文件\include</Filter>
     </ClInclude>
     <ClInclude Include="include\miniBLAS.hpp">
@@ -88,6 +82,9 @@
     </ClInclude>
     <ClInclude Include="shapemodel\CVector.h">
       <Filter>头文件\shapemodel</Filter>
+    </ClInclude>
+    <ClInclude Include="include\kdNNTree.hpp">
+      <Filter>头文件\include</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

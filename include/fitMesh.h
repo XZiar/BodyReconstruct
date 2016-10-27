@@ -6,7 +6,7 @@
 #include "cshapepose.h"
 #include "tools.h"
 
-#include "kdNNTree.h"
+#include "kdNNTree.hpp"
 
 using arColIS = arma::Col<char>;
 
@@ -39,7 +39,7 @@ struct CScan : public CBaseModel
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     cv::flann::Index *kdtree;
-	miniBLAS::kdNNTree nntree;
+	miniBLAS::NNTree nntree;
 
 	void prepare();
 };
@@ -160,9 +160,9 @@ private:
 	 **/
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
 	arColIS checkAngle(const miniBLAS::VertexVec& mthNorms, const miniBLAS::VertexVec& tpNorms, const double angle_thres);
-	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, double &scale);
-	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam, double &scale);
-	uint32_t updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &scale, double &err);
+	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr);
+	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam);
+	uint32_t updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/

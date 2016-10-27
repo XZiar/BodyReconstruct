@@ -48,9 +48,6 @@
     <ClCompile Include="shapemodel\Show.cpp">
       <Filter>source files\shapemodel</Filter>
     </ClCompile>
-    <ClCompile Include="src\kdNNTree.cpp">
-      <Filter>source files\src</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\fitMesh.h">
@@ -65,10 +62,10 @@
     <ClInclude Include="main.h">
       <Filter>header files</Filter>
     </ClInclude>
-    <ClInclude Include="include\kdNNTree.h">
+    <ClInclude Include="include\miniBLAS.hpp">
       <Filter>header files\include</Filter>
     </ClInclude>
-    <ClInclude Include="include\miniBLAS.hpp">
+    <ClInclude Include="include\kdNNTree.hpp">
       <Filter>header files\include</Filter>
     </ClInclude>
     <ClInclude Include="shapemodel\CMatrix.h">
