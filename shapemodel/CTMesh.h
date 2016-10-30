@@ -26,9 +26,6 @@
 #include "CTensor.h"
 #include "Show.h"
 
-#define USE_SSE
-#define USE_SSE2
-#define USE_SSE4
 #include "miniBLAS.hpp"
 
 #define NO_OF_EIGENVECTORS 20
@@ -116,32 +113,30 @@ public:
 class CMesh
 {
 public:
-	bool isCopy = false;
+	CMesh()
+	{
+		evecCache.reset(new miniBLAS::VertexVec());
+	}
+	CMesh(const CMesh& aMesh) { *this = aMesh; };
+	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn = nullptr);
+	~CMesh() = default;
+
+	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
 	void preCompute(const char *__restrict validMask);
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
-	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn,
-		const char *__restrict validMask);
+	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const char *__restrict validMask);
 	int updateJntPos();
 	void updateJntPosEx();
-	static std::vector<CMatrix<double> > readShapeSpaceEigens(std::string fileName, int numEigenVectors);
-	static std::vector<CMatrix<double> > readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints);
-	// constructor
-	inline CMesh();
-	inline CMesh(const CMesh& aMesh);
-	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn = nullptr);
-	CMesh(int aPoints, int aPatches);
-	// destructor
-	~CMesh();
+	
 	// Reads the mesh from a file
 	// liuyebin collect the readmodel functions together. The first is for initISA, and the second is for trackHybOpt
 	bool readModel(const char* aFilename, bool smooth = false);
-	bool readModelHybOpt(const char* aFilename, bool smooth = false);
 	bool adaptOFF(const char* aFilename, float lambda);
 	bool readOFF(const char* aFilename);
 	void centerModel();
@@ -166,11 +161,8 @@ public:
 	void twistToMatrix(CVector<float>& aTwist, CVector<CMatrix<float> >& M);
 
 	// Fast projection of a 3-D point to the image plane
-	inline void projectPoint(CMatrix<float>& P, float X, float Y, float Z, int& x, int& y);
-	inline void projectPoint(CMatrix<float>& P, float X, float Y, float Z, float& x, float& y);
-
-	// Indicates a new frame, causing copying the current motion into the motion history
-	//void newFrame();
+	template<typename T>
+	void projectPoint(const CMatrix<float>& P, const float X, const float Y, const float Z, T& x, T& y);
 
 	// Copies aMesh
 	void operator=(const CMesh& aMesh);
@@ -189,9 +181,10 @@ public:
 	bool isNeighbor(int i, int j) { return mNeighbor(mJointMap(i), mJointMap(j)); };
 	bool isEndJoint(int aJointID) { return mEndJoint[aJointID]; }
 
-	inline void GetPoint(int i, float& x, float& y, float& z);
-	inline void GetPoint(int i, float& x, float& y, float& z, int& j);
-	inline void GetPoint(int i, float& x, float& y, float& z, float& j);
+	template<typename T>
+	void GetPoint(const int i, T& x, T& y, T& z);
+	template<typename T, typename T2>
+	void GetPoint(const int i, T& x, T& y, T& z, T2& w);
 	inline void GetPatch(int i, int& x, int& y, int& z);
 	inline void GetBounds(int J, int i, float& x, float& y, float& z);
 	int GetBoundJID(int J) { return (int)mBounds(J, 8, 0); };
@@ -237,12 +230,23 @@ public:
 	inline void resetCurrentMotion() { mCurrentMotion.reset(mJointNumber); };
 	// Gives access to current motion
 	inline CMeshMotion& currentMotion() { return mCurrentMotion; };
-	// Gives access to pose history
-	//inline CVector<CMeshMotion>& history() {return mHistory;};
 
 	miniBLAS::VertexVec vPoints;
 	miniBLAS::VertexVec validPts;
 protected:
+	bool isCopy = false;
+	void CheckCopy(const bool allow)
+	{
+		if (isCopy != allow)
+		{
+			printf("func called only allowed in %s!\n", allow ? "copy" : "non-copy");
+			getchar();
+			exit(-1);
+		}
+	}
+	arma::mat evectors;
+	std::shared_ptr<miniBLAS::VertexVec> evecCache;
+
 	struct SmoothParam
 	{
 		uint32_t idx;
@@ -312,58 +316,32 @@ protected:
 	void getWeightsinBuffer(char *buffer, int ptNo);
 };
 
-// constructor
-inline CMesh::CMesh()
+template<typename T>
+void CMesh::projectPoint(const CMatrix<float>& P, const float X, const float Y, const float Z, T& x, T& y)
 {
-	//mPoints=0;
-	//mPointsS=0;
-	//mPatch=0;
-	//mAppearanceField = 0;
-	//mOccluded = 0;
+	const float hx = P.data()[0] * X + P.data()[1] * Y + P.data()[2] * Z + P.data()[3];
+	const float hy = P.data()[4] * X + P.data()[5] * Y + P.data()[6] * Z + P.data()[7];
+	const float hz = P.data()[8] * X + P.data()[9] * Y + P.data()[10] * Z + P.data()[11];
+	const float invhz = 1.0f / hz;
+	x = (T)(hx*invhz + 0.5f);
+	y = (T)(hy*invhz + 0.5f);
 }
-
-inline CMesh::CMesh(const CMesh& aMesh)
+template<typename T>
+void CMesh::GetPoint(const int i, T& x, T& y, T& z)
 {
-
-	//mPoints=0;
-	//mPointsS=0;
-	//mPatch=0; 
-	//mAppearanceField = 0;
-	//mOccluded = 0;
-	*this = aMesh;
+	const auto obj = mPoints[i];
+	x = T(obj[0]);
+	y = T(obj[1]);
+	z = T(obj[2]);
 }
-
-// projectPoint
-inline void CMesh::projectPoint(CMatrix<float>& P, float X, float Y, float Z, int& x, int& y)
+template<typename T, typename T2>
+void CMesh::GetPoint(const int i, T& x, T& y, T& z, T2& w)
 {
-
-	float hx = P.data()[0] * X + P.data()[1] * Y + P.data()[2] * Z + P.data()[3];
-	float hy = P.data()[4] * X + P.data()[5] * Y + P.data()[6] * Z + P.data()[7];
-	float hz = P.data()[8] * X + P.data()[9] * Y + P.data()[10] * Z + P.data()[11];
-
-
-	float invhz = 1.0 / hz;
-	x = (int)(hx*invhz + 0.5);
-	y = (int)(hy*invhz + 0.5);
-}
-
-inline void CMesh::projectPoint(CMatrix<float>& P, float X, float Y, float Z, float& x, float& y)
-{
-
-	float hx = P.data()[0] * X + P.data()[1] * Y + P.data()[2] * Z + P.data()[3];
-	float hy = P.data()[4] * X + P.data()[5] * Y + P.data()[6] * Z + P.data()[7];
-	float hz = P.data()[8] * X + P.data()[9] * Y + P.data()[10] * Z + P.data()[11];
-
-	float invhz = 1.0 / hz;
-	x = hx*invhz;
-	y = hy*invhz;
-}
-
-inline void CMesh::GetPoint(int i, float& x, float& y, float& z)
-{
-	x = mPoints[i](0);
-	y = mPoints[i](1);
-	z = mPoints[i](2);
+	const auto obj = mPoints[i];
+	x = T(obj[0]);
+	y = T(obj[1]);
+	z = T(obj[2]);
+	w = T(obj[3]);
 }
 
 inline void CMesh::GetPatch(int i, int& x, int& y, int& z)
@@ -373,30 +351,12 @@ inline void CMesh::GetPatch(int i, int& x, int& y, int& z)
 	z = mPatch[i](2);
 }
 
-
 inline void CMesh::GetBounds(int J, int i, float& x, float& y, float& z)
 {
 	x = mBounds(J, i, 0);
 	y = mBounds(J, i, 1);
 	z = mBounds(J, i, 2);
 }
-
-inline void CMesh::GetPoint(int i, float& x, float& y, float& z, int& j)
-{
-	x = mPoints[i](0);
-	y = mPoints[i](1);
-	z = mPoints[i](2);
-	j = int(mPoints[i](3));
-}
-
-inline void CMesh::GetPoint(int i, float& x, float& y, float& z, float& j)
-{
-	x = mPoints[i](0);
-	y = mPoints[i](1);
-	z = mPoints[i](2);
-	j = mPoints[i](3);
-}
-
 
 #endif
 

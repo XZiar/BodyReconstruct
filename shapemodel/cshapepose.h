@@ -10,7 +10,6 @@ class CShapePose
 private:
 	CMesh initMesh_bk;
 	arma::mat evectors;
-	miniBLAS::VertexVec evecCache;
 	miniBLAS::Vertex evalue[5];
 	int getpose(const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
 		const uint32_t numEigenVectors, double* pointsOut, double* jointsOut);
@@ -27,8 +26,6 @@ public:
 	miniBLAS::VertexVec getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn,
 		const char *__restrict validMask) const;
-	void getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints);
-	void getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints);
 	void setEvectors(const arma::mat &evectorsIn);
 	void setEvalues(const arma::mat& evelues);
 };

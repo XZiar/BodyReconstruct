@@ -137,6 +137,8 @@ public:
 private:
 	std::string baseFName;
 	bool mode = true;//true: one scan, false:scan sequence
+	miniBLAS::Vertex camPos;
+	pcl::ModelCoefficients coef;
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
@@ -154,15 +156,15 @@ private:
 	/** @brief fitShapePose
 	 ** Fit the model to the scan by pose & shape
 	 **/
-	void fitShapePose(const CScan& scan, const bool solveP = true, const bool solveS = true, uint32_t iter = 10);
+	void fitShapePose(const CScan& scan, const bool solveP = true, const bool solveS = true, const uint32_t iter = 10);
 	/** @brief checkAngle
 	 ** @param angle_thres max angle(in degree) between two norms
 	 **/
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
-	arColIS checkAngle(const miniBLAS::VertexVec& mthNorms, const miniBLAS::VertexVec& tpNorms, const double angle_thres);
+	arColIS nnFilter(const miniBLAS::NNResult& res, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr);
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam);
-	uint32_t updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
+	uint32_t updatePoints(const CScan& scan, const double angLim, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/

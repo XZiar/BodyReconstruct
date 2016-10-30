@@ -41,6 +41,13 @@ static void showfloat4(const char *name, const __m128 *data)
 	printf("%s = %f,%f,%f,%f\n", name, ptr[0], ptr[1], ptr[2], ptr[3]);
 }
 
+static void printM4x4(const char * name, const float *ptr)
+{
+	printf("%s : \n", name);
+	for (uint32_t a = 0; a < 16; a += 4)
+		printf("\t%f,%f,%f,%f\n", ptr[a], ptr[a + 1], ptr[a + 2], ptr[a + 3]);
+}
+
 // C J O I N T -----------------------------------------------------------------
 // constructor
 CJoint::CJoint(CVector<float>& aDirection, CVector<float>& aPoint, int aParent)
@@ -234,244 +241,88 @@ CMeshMotion& CMeshMotion::operator=(const CMeshMotion& aCopyFrom)
 
 // C M E S H -------------------------------------------------------------------
 
-// constructor
-CMesh::CMesh(int aPatches, int aPoints)
+// operator=
+void CMesh::operator=(const CMesh& aMesh)
 {
-	mPoints.resize(aPoints);
-	mPatch.resize(aPatches);
-	mNumPoints = aPoints;
-	mNumPatch = aPatches;
+	mJointNumber = aMesh.mJointNumber;
+	mNumPoints = aMesh.mNumPoints;
+	mNumPatch = aMesh.mNumPatch;
+	mNumSmooth = aMesh.mNumSmooth;
 
-	for (int i = 0; i < aPoints; i++)
-	{
-		mPoints[i].setSize(4);
-	}
-	for (int i = 0; i < aPatches; i++)
-	{
-		mPatch[i].setSize(3);
-	}
+	mPoints = aMesh.mPoints;
+	mPatch = aMesh.mPatch;
+
+	mNoOfBodyParts = aMesh.mNoOfBodyParts;
+	mBoundJoints = aMesh.mBoundJoints;
+
+	mBounds = aMesh.mBounds;
+	mCenter = aMesh.mCenter;
+	mJointMap = aMesh.mJointMap;
+	mNeighbor = aMesh.mNeighbor;
+	mEndJoint = aMesh.mEndJoint;
+
+	mCovered = aMesh.mCovered;
+	mExtremity = aMesh.mExtremity;
+
+	mJoint = aMesh.mJoint;
+	mInfluencedBy = aMesh.mInfluencedBy;
+
+	mAccumulatedMotion = aMesh.mAccumulatedMotion;
+	mCurrentMotion = aMesh.mCurrentMotion;
+
+	weightMatrix = aMesh.weightMatrix;
+
+	evecCache = aMesh.evecCache;
+	wgtMat = aMesh.wgtMat;
+	minWgtMat = aMesh.minWgtMat;
+	theMinEleSum = aMesh.theMinEleSum;
+	wMatGap = aMesh.wMatGap;
+	theMinWgtMat = &minWgtMat[0];
+	vPoints = aMesh.vPoints;
+	ptSmooth = aMesh.ptSmooth;
+	thePtSmooth = &ptSmooth[0];
 }
 
-// destructor
-CMesh::~CMesh()
+CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn)
 {
-	//cout << "DEL-CMESH...";
-	//if(mPointsS !=0) delete[] mPointsS;
-	//if(mPoints !=0) delete[] mPoints;
-	//if(mPatch !=0) delete[] mPatch;
-	//if(mAppearanceField !=0) delete[] mAppearanceField;
-	//cout << "...ok\n"; 
-}
+	using miniBLAS::Vertex;
+	isCopy = true;
+	mJointNumber = from.mJointNumber;
+	mNumPoints = from.mNumPoints;
 
-// readModel
-bool CMesh::readModelHybOpt(const char* aFilename, bool smooth)
-{
-#if 0
-#ifndef EXEC_FAST
-	cout << "Read Model... ";
-#endif
+	mBounds = from.mBounds;
+	mCenter = from.mCenter;
+	mJoint = from.mJoint;
+	mJointMap = from.mJointMap;
+	mNeighbor = from.mNeighbor;
+	mEndJoint = from.mEndJoint;
+	mCovered = from.mCovered;
+	mExtremity = from.mExtremity;
+	mInfluencedBy = from.mInfluencedBy;
 
-	std::ifstream aStream(aFilename);
-	if (!aStream.is_open())
-	{
-		cerr << "Could not open " << aFilename << endl;
-		return false;
-	}
+	//avoid overhead of copying data unecessarily
+	evecCache = from.evecCache;
+	wMatGap = from.wMatGap;
+	theMinEleSum = from.theMinEleSum;
+	theMinWgtMat = from.theMinWgtMat;
+	thePtSmooth = from.thePtSmooth;
+	theSmtCnt = from.theSmtCnt;
+	theVPtSmooth = &from.validPtSmooth[0];
+	theVSmtCnt = &from.validSmtCnt[0];
 
-	int aXSize, aYSize, size = 4;
-
-	CJoint Joint;
-
-	aStream >> mNumPoints;
-	aStream >> mNumPatch;
-	aStream >> mJointNumber;
-	if (smooth)
-	{
-		aStream >> mNumSmooth;
-		if (mNumSmooth == 1)
-			smooth = false;
-		else
-			size = 3 + mNumSmooth * 2;
-	}
+	if (pointsIn == nullptr)
+		vPoints = from.vPoints;
 	else
-		mNumSmooth = 1;
-
-	weightMatrix.setSize(mNumPoints, mJointNumber);
-	weightMatrix = 0;
-
-#ifndef EXEC_FAST
-	cout << mNumPoints << " " << mNumPatch << " " << mJointNumber << " " << mNumSmooth << endl;
-#endif
-
-	CVector<bool> BoundJoints(mJointNumber + 1, false);
-
-	mJoint.setSize(mJointNumber + 1);
-
-	// Read mesh components
-	mPoints.resize(mNumPoints);
-	mPatch.resize(mNumPatch);
-
-	for (int i = 0; i < mNumPoints; i++)
-	{
-		mPoints[i].setSize(size);
-	}
-
-	for (int i = 0; i < mNumPatch; i++)
-	{
-		mPatch[i].setSize(3);
-	}
-
-	for (int i = 0; i < mNumPoints; i++)
-	{
-		aStream >> mPoints[i][0];
-		aStream >> mPoints[i][1];
-		aStream >> mPoints[i][2];
-		if (smooth)
-		{
-			for (int n = 0; n < mNumSmooth * 2; n++)
-				aStream >> mPoints[i][3 + n];
-		}
-		else
-			aStream >> mPoints[i][3];
-		BoundJoints((int)mPoints[i][3]) = true;
-	}
-
-	for (int i0 = 0; i0 < mNumPoints; i0++)
-	{
-		for (int i1 = 3; i1 < mNumSmooth * 2 + 3; i1 += 2)
-		{
-			int jointID = int(mPoints[i0][i1]);
-			float weight = mPoints[i0][i1 + 1];
-			weightMatrix(i0, jointID - 1) += weight;
-		}
-	}
-
-	for (int i = 0; i < mNumPatch; i++)
-	{
-		aStream >> mPatch[i][0];
-		aStream >> mPatch[i][1];
-		aStream >> mPatch[i][2];
-	}
-
-	// set bounds
-	int count = 0;
-	mJointMap.setSize(mJointNumber + 1);
-	mJointMap = -1;
-	for (int j = 0; j <= mJointNumber; ++j)
-		if (BoundJoints(j))
-			mJointMap(j) = count++;
-
-	mBounds.setSize(count, 9, 3);
-	mNeighbor.setSize(count, count);
-	CMatrix<float> minV(count, 3, 100000);
-	CMatrix<float> maxV(count, 3, -100000);
-
-	for (int i = 0; i < mNumPoints; i++)
-	{
-		int index = mJointMap((int)mPoints[i][3]);
-
-		if (mPoints[i][0] < minV(index, 0)) minV(index, 0) = mPoints[i][0];
-		if (mPoints[i][1] < minV(index, 1)) minV(index, 1) = mPoints[i][1];
-		if (mPoints[i][2] < minV(index, 2)) minV(index, 2) = mPoints[i][2];
-		if (mPoints[i][0] > maxV(index, 0)) maxV(index, 0) = mPoints[i][0];
-		if (mPoints[i][1] > maxV(index, 1)) maxV(index, 1) = mPoints[i][1];
-		if (mPoints[i][2] > maxV(index, 2)) maxV(index, 2) = mPoints[i][2];
-	}
-
-	for (int i = 0; i < count; ++i)
-	{
-		mBounds(i, 0, 0) = mBounds(i, 1, 0) = mBounds(i, 2, 0) = mBounds(i, 3, 0) = minV(i, 0);
-		mBounds(i, 4, 0) = mBounds(i, 5, 0) = mBounds(i, 6, 0) = mBounds(i, 7, 0) = maxV(i, 0);
-		mBounds(i, 0, 1) = mBounds(i, 1, 1) = mBounds(i, 4, 1) = mBounds(i, 5, 1) = minV(i, 1);
-		mBounds(i, 2, 1) = mBounds(i, 3, 1) = mBounds(i, 6, 1) = mBounds(i, 7, 1) = maxV(i, 1);
-		mBounds(i, 0, 2) = mBounds(i, 2, 2) = mBounds(i, 4, 2) = mBounds(i, 6, 2) = minV(i, 2);
-		mBounds(i, 1, 2) = mBounds(i, 3, 2) = mBounds(i, 5, 2) = mBounds(i, 7, 2) = maxV(i, 2);
-	}
-
-	mCenter.setSize(4);
-	mCenter[0] = (maxV(0, 0) + minV(0, 0)) / 2.0f;
-	mCenter[1] = (maxV(0, 1) + minV(0, 1)) / 2.0f;
-	mCenter[2] = (maxV(0, 2) + minV(0, 2)) / 2.0f;
-	mCenter[3] = 1.0f;
-
-	for (int j = 0; j < mJointMap.size(); ++j)
-		if (mJointMap(j) >= 0)
-			mBounds(mJointMap(j), 8, 0) = j;
-
-	// Read joints
-	int dummy;
-	CVector<float> aDirection(3);
-	CVector<float> aPoint(3);
-	for (int aJointID = 1; aJointID <= mJointNumber; aJointID++)
-	{
-		aStream >> dummy; // ID
-		aStream >> aDirection(0) >> aDirection(1) >> aDirection(2);
-		aStream >> aPoint(0) >> aPoint(1) >> aPoint(2);
-		mJoint(aJointID).set(aDirection, aPoint);
-		aStream >> mJoint(aJointID).mParent;
-	}
-	// Determine which joint motion is influenced by parent joints
-	mInfluencedBy.setSize(mJointNumber + 1, mJointNumber + 1);
-	mInfluencedBy = false;
-	for (int j = 0; j <= mJointNumber; j++)
-		for (int i = 0; i <= mJointNumber; i++)
-		{
-			if (i == j) mInfluencedBy(i, j) = true;
-			if (isParentOf(j, i)) mInfluencedBy(i, j) = true;
-		}
-
-	mNeighbor = false;
-	for (int i = 0; i < mNeighbor.xSize(); i++)
-	{
-		mNeighbor(i, i) = true;
-		int jID = (int)mBounds(i, 8, 0);
-		for (int j = jID - 1; j >= 0; --j)
-		{
-			if (mJointMap(j) >= 0 && mInfluencedBy(jID, j))
-			{
-				mNeighbor(i, mJointMap(j)) = true;
-				mNeighbor(mJointMap(j), i) = true;
-				break;
-			}
-		}
-	}
-
-	mEndJoint.setSize(mJointNumber + 1);
-	mEndJoint.fill(true);
-	for (int i = 1; i <= mJointNumber; ++i)
-		mEndJoint[mJoint(i).mParent] = false;
-
-	for (int i = 1; i <= mJointNumber; ++i)
-		if (mEndJoint[i] == true)
-		{
-			int j = i;
-			while (mJointMap[--j] == -1)
-			{
-				mEndJoint[j] = true;
-			}
-		}
-
-	cout << "End Joints:" << endl;
-	cout << mEndJoint << endl;
-
-	mAccumulatedMotion.reset(mJointNumber);
-	mCurrentMotion.reset(mJointNumber);
-
-#ifndef EXEC_FAST
-	cout << mNeighbor << endl;
-	cout << "ok" << endl;
-#endif
-#endif
-	return true;
+		vPoints = *pointsIn;
+	if (vpIn == nullptr)
+		validPts.resize(from.validPts.size());
+	else
+		validPts = *vpIn;
 }
 
 // readModel
 bool CMesh::readModel(const char* aFilename, bool smooth)
 {
-#ifndef EXEC_FAST
-	cout << "Read Model... ";
-#endif
-
 	std::ifstream aStream(aFilename);
 	if (!aStream.is_open())
 	{
@@ -500,9 +351,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	weightMatrix.setSize(mNumPoints, mJointNumber);
 	weightMatrix = 0;
 
-#ifndef EXEC_FAST
-	cout << mNumPoints << " " << mNumPatch << " " << mJointNumber << " " << mNumSmooth << endl;
-#endif
+	//cout << mNumPoints << " " << mNumPatch << " " << mJointNumber << " " << mNumSmooth << endl;
 
 	CVector<bool> BoundJoints(mJointNumber + 1, false);
 	mBoundJoints.setSize(mJointNumber + 1);
@@ -572,13 +421,10 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 
 	mNoOfBodyParts = count;
 
-#ifndef EXEC_FAST
-	cout << "Bodyparts: " << count << endl;
-	cout << "\nmJointMap: " << mJointMap;
-	cout << "\nBoundJoints: " << BoundJoints;
-#endif	
+	//cout << "Bodyparts: " << count << endl;
+	//cout << "\nmJointMap: " << mJointMap;
+	//cout << "\nBoundJoints: " << BoundJoints;
 	mBoundJoints = BoundJoints;
-
 
 	mBounds.setSize(count, 9, 3);
 	mNeighbor.setSize(count, count);
@@ -612,9 +458,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	mCenter[1] /= (float)mNumPoints;
 	mCenter[2] /= (float)mNumPoints;
 
-#ifndef EXEC_FAST
-	cout << "mCenter=" << mCenter << endl;
-#endif
+	//cout << "mCenter=" << mCenter << endl;
 	for (int i = 0; i < count; ++i)
 	{
 		mBounds(i, 0, 0) = mBounds(i, 1, 0) = mBounds(i, 2, 0) = mBounds(i, 3, 0) = minV(i, 0);
@@ -688,10 +532,8 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 				mEndJoint[j] = true;
 			}
 		}
-#ifndef EXEC_FAST
-	cout << "End Joints:" << endl;
-	cout << mEndJoint << endl;
-#endif
+	//cout << "End Joints:" << endl;
+	//cout << mEndJoint << endl;
 	mAccumulatedMotion.reset(mJointNumber);
 	mCurrentMotion.reset(mJointNumber);
 
@@ -702,11 +544,35 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	for (int i = 0; i < mCovered.size(); ++i)
 		aStream >> mCovered[i];
 
-#ifndef EXEC_FAST
-	cout << mNeighbor << endl;
-	cout << "ok" << endl;
-#endif
+	//cout << mNeighbor << endl;
+	//cout << "ok" << endl;
 	return true;
+}
+
+void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
+{
+	evectors = evectorsIn;
+	if (evectorsIn.n_rows != SHAPEPARAM_NUM || SHAPEPARAM_NUM != 20)
+	{
+		printf("evecctors should be 20 for optimization.\n\n");
+		getchar();
+		exit(-1);
+	}
+	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
+	evecCache->resize(rows * 64);//15+1 vertex for a row
+	float *pVert = (*evecCache)[0];
+	//20 * x(rows*3)
+	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
+	for (uint32_t a = 0; a < rows; ++a)
+	{
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *px++;
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *py++;
+		for (uint32_t b = 0; b < 20; ++b)
+			*pVert++ = *pz++;
+		pVert += 4;
+	}
 }
 
 void CMesh::prepareData()
@@ -804,25 +670,15 @@ void CMesh::preCompute(const char *__restrict validMask)
 
 void CMesh::centerModel()
 {
-
-#ifndef EXEC_FAST
-	cout << "RESET CENTER!\n";
-#endif
-
 	CVector<float> trans(4);
 	trans(0) = -mCenter(0); trans(1) = -mCenter(1); trans(2) = -mCenter(2); trans(3) = 0;
-
-#ifndef EXEC_FAST
-	cout << "trans:" << trans;
-#endif
-
+	//cout << "trans:" << trans;
 	for (int i = 0; i < mNumPoints; i++)
 	{
 		mPoints[i](0) += trans(0);
 		mPoints[i](1) += trans(1);
 		mPoints[i](2) += trans(2);
 	}
-
 	for (int i = 1; i <= mJointNumber; i++)
 	{
 		CVector<float> jPos(mJoint[i].getPoint());
@@ -830,7 +686,6 @@ void CMesh::centerModel()
 			jPos(j) += trans(j);
 		mJoint[i].setPoint(jPos);
 	}
-
 	for (int i = 0; i < mBounds.xSize(); ++i)
 		for (int j = 0; j < mBounds.ySize() - 1; ++j)
 		{
@@ -874,34 +729,6 @@ void CMesh::writeAdaptModel(const char* aFilename, const CMesh* adM)
 	// Write vertices
 	for (int i = 0; i < mNumPoints; i++)
 	{
-
-	#if 0
-		if (!IsCovered(GetBodyPart(int(mPoints[i][3]))))
-		{
-			aStream << mPoints[i][0] << " ";
-			aStream << mPoints[i][1] << " ";
-			aStream << mPoints[i][2] << std::endl;
-		}
-		else
-		{
-			float tmp = mPoints[i][4];
-			int j = 5;
-			for (; j < mCovered.size() * 2 + 3;)
-			{
-				if (IsCovered(GetBodyPart(int(mPoints[i][j]))))
-				{
-					tmp += mPoints[i][++j];
-					++j;
-				}
-				else j += 2;
-			}
-			aStream << mPoints[i][0] * (1.0 - tmp) + tmp*adM->mPoints[i][0] << " ";
-			aStream << mPoints[i][1] * (1.0 - tmp) + tmp*adM->mPoints[i][1] << " ";
-			aStream << mPoints[i][2] * (1.0 - tmp) + tmp*adM->mPoints[i][2] << std::endl;
-		}
-	#endif    
-
-
 		float tmp = 0;
 		for (int j = 3; j < mCovered.size() * 2 + 3;)
 		{
@@ -963,7 +790,6 @@ bool CMesh::readOFF(const char* aFilename)
 	std::ifstream aStream(aFilename);
 	if (aStream.is_open())
 	{
-
 		char buffer[200];
 		aStream.getline(buffer, 200);
 		cout << buffer << endl;
@@ -1024,7 +850,6 @@ bool CMesh::readOFF(const char* aFilename)
 	else return false;
 }
 
-
 void CMesh::writeSkel(const char* aFilename)
 {
 	cout << "Write Skel... ";
@@ -1040,13 +865,13 @@ void CMesh::writeSkel(const char* aFilename)
 		aStream << mJoint[i].getPoint() << " ";
 		aStream << mJoint[i].mParent << std::endl;
 	}
-
 	cout << "ok" << endl;
 }
 
 // rigidMotion
 void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth, bool force)
 {
+	CheckCopy(false);
 	CVector<float> a(4); a(3) = 1.0;
 	CVector<float> b(4);
 	// Apply motion to points
@@ -1404,13 +1229,6 @@ void CMesh::makeSmooth(CMesh* initMesh, bool dual)
 	}
 }
 
-static void printM4x4(const char * name, const float *ptr)
-{
-	printf("%s : \n", name);
-	for (uint32_t a = 0; a < 16;a += 4)
-		printf("\t%f,%f,%f,%f\n", ptr[a], ptr[a + 1], ptr[a + 2], ptr[a + 3]);
-}
-
 // angleToMatrix
 void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M)
 {
@@ -1466,7 +1284,6 @@ void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJ
 			printf("new: %e,%e,%e,%e \t\told: %e,%e,%e,%e\n", nM.x, nM.y, nM.z, nM.w, oM.x, oM.y, oM.z, oM.w);
 		}
 		*/
-
 		for (int jj = 0; jj < mJointNumber; jj++)
 		{
 			uint32_t jid = ids[jj];
@@ -1514,397 +1331,6 @@ bool CMesh::isParentOf(int aParentJointID, int aJointID)
 	return isParentOf(aParentJointID, mJoint(aJointID).mParent);
 }
 
-// operator=
-void CMesh::operator=(const CMesh& aMesh)
-{
-	mJointNumber = aMesh.mJointNumber;
-	mNumPoints = aMesh.mNumPoints;
-	mNumPatch = aMesh.mNumPatch;
-	mNumSmooth = aMesh.mNumSmooth;
-
-	mPoints = aMesh.mPoints;
-	mPatch = aMesh.mPatch;
-
-	mNoOfBodyParts = aMesh.mNoOfBodyParts;
-	mBoundJoints = aMesh.mBoundJoints;
-
-	mBounds = aMesh.mBounds;
-	mCenter = aMesh.mCenter;
-	mJointMap = aMesh.mJointMap;
-	mNeighbor = aMesh.mNeighbor;
-	mEndJoint = aMesh.mEndJoint;
-
-	mCovered = aMesh.mCovered;
-	mExtremity = aMesh.mExtremity;
-
-	mJoint = aMesh.mJoint;
-	mInfluencedBy = aMesh.mInfluencedBy;
-
-	mAccumulatedMotion = aMesh.mAccumulatedMotion;
-	mCurrentMotion = aMesh.mCurrentMotion;
-
-	weightMatrix = aMesh.weightMatrix;
-
-	wgtMat = aMesh.wgtMat;
-	minWgtMat = aMesh.minWgtMat;
-	theMinEleSum = aMesh.theMinEleSum;
-	wMatGap = aMesh.wMatGap;
-	theMinWgtMat = &minWgtMat[0];
-	vPoints = aMesh.vPoints;
-	ptSmooth = aMesh.ptSmooth;
-	thePtSmooth = &ptSmooth[0];
-}
-
-CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn)
-{
-	using miniBLAS::Vertex;
-	isCopy = true;
-	mJointNumber = from.mJointNumber;
-	mNumPoints = from.mNumPoints;
-	mNumPatch = 0;// from.mNumPatch;
-	mNumSmooth = from.mNumSmooth;
-
-	mNoOfBodyParts = from.mNoOfBodyParts;
-	mBoundJoints = from.mBoundJoints;
-
-	mBounds = from.mBounds;
-	mCenter = from.mCenter;
-	mJointMap = from.mJointMap;
-	mNeighbor = from.mNeighbor;
-	mEndJoint = from.mEndJoint;
-
-	mCovered = from.mCovered;
-	mExtremity = from.mExtremity;
-
-	mJoint = from.mJoint;
-	mInfluencedBy = from.mInfluencedBy;
-
-	mAccumulatedMotion = from.mAccumulatedMotion;
-	mCurrentMotion = from.mCurrentMotion;
-
-	//avoid overhead of copying data unecessarily
-	wMatGap = from.wMatGap;
-	theMinEleSum = from.theMinEleSum;
-	theMinWgtMat = from.theMinWgtMat;
-	thePtSmooth = from.thePtSmooth;
-	theSmtCnt = from.theSmtCnt;
-	theVPtSmooth = &from.validPtSmooth[0];
-	theVSmtCnt = &from.validSmtCnt[0];
-	if (pointsIn == nullptr)
-		vPoints = from.vPoints;
-	else
-		vPoints = *pointsIn;
-	if (vpIn == nullptr)
-		validPts.resize(from.validPts.size());
-	else
-	{
-		validPts = *vpIn;
-	}
-}
-
-void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
-{
-	int I[4];
-	CVector<float> aPoint(3);
-	int ax, ay, bx, by, cx, cy;
-	int Size = (*this).GetMeshSize();
-	int j;
-
-	int det;
-
-	float X, Y, Z;
-
-	//cout << Size << endl;
-
-	for (int i = 0; i < Size; i++)
-	{
-		(*this).GetPatch(i, I[0], I[1], I[2]);
-		j = 0;
-		// Test if patch is visible ...
-		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
-		(*this).projectPoint(P, X, Y, Z, ax, ay);
-		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
-		(*this).projectPoint(P, X, Y, Z, bx, by);
-		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
-		(*this).projectPoint(P, X, Y, Z, cx, cy);
-
-		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
-
-		if (det < 0.001)
-		{
-			for (j = 0; j < 3; j++)
-			{
-				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-
-				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-					aImage.drawLine(ax, ay, bx, by, aLineValue);
-				ax = bx;
-				ay = by;
-			}
-			j = 0;
-			(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-			if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-				aImage.drawLine(ax, ay, bx, by, aLineValue);
-		}
-	}
-}
-
-void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineVal, int aNodeVal)
-{
-	projectToImage(aImage, P, aLineVal);
-	projectPointsToImage(aImage, P, aNodeVal);
-}
-
-void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB)
-{
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, 255);
-	int aSize = aMesh.size();
-	int a2Size = 2 * aSize;
-	for (int i = 0; i < aSize; i++)
-		if (aMesh.data()[i] == 255)
-		{
-			aImage.data()[i] = aLineR;
-			aImage.data()[i + aSize] = aLineG;
-			aImage.data()[i + a2Size] = aLineB;
-		}
-#if 0
-	int mx, my;
-	projectPoint(P, mCenter[0], mCenter[1], mCenter[2], mx, my);
-	int crossSize = 10;
-	int x1 = NMath::max(mx - crossSize, 0); int x2 = NMath::min(mx + crossSize, aImage.xSize() - 1);
-	int y1 = NMath::max(my - crossSize, 0); int y2 = NMath::min(my + crossSize, aImage.ySize() - 1);
-	for (int x = x1; x <= x2; ++x)
-	{
-		aImage(x, my, 0) = 40;
-		aImage(x, my, 1) = 240;
-		aImage(x, my, 2) = 40;
-	}
-	for (int y = y1; y <= y2; ++y)
-	{
-		aImage(mx, y, 0) = 40;
-		aImage(mx, y, 1) = 240;
-		aImage(mx, y, 2) = 40;
-	}
-#endif
-}
-
-void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB, int aNodeR, int aNodeG, int aNodeB)
-{
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, 255, 128);
-	int aSize = aMesh.size();
-	int a2Size = 2 * aSize;
-	for (int i = 0; i < aSize; i++)
-		if (aMesh.data()[i] == 255)
-		{
-			aImage.data()[i] = aLineR;
-			aImage.data()[i + aSize] = aLineG;
-			aImage.data()[i + a2Size] = aLineB;
-		}
-		else if (aMesh.data()[i] == 128)
-		{
-			aImage.data()[i] = aNodeR;
-			aImage.data()[i + aSize] = aNodeG;
-			aImage.data()[i + a2Size] = aNodeB;
-		}
-}
-
-// projectPointsToImage
-void CMesh::projectPointsToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aNodeVal)
-{
-	int ax, ay;
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, aNodeVal);
-
-	int Size = (*this).GetPointSize();
-	for (int i = 0; i < Size; i++)
-	{
-		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
-		if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-			if (aMesh(ax, ay) == aNodeVal)
-				aImage(ax, ay) = aNodeVal;
-	}
-}
-
-
-void CMesh::projectPointsToImage(CTensor<float>& a3DCoords, CMatrix<float>& P)
-{
-	int ax, ay;
-	int aNodeVal = 39;
-
-	CMatrix<float> aMesh(a3DCoords.xSize(), a3DCoords.ySize(), 0);
-	projectToImage(aMesh, P, aNodeVal);
-
-	int Size = GetPointSize();
-	for (int i = 0; i < Size; i++)
-	{
-		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
-		if (ax >= 0 && ay >= 0 && ax < a3DCoords.xSize() && ay < a3DCoords.ySize())
-			if (aMesh(ax, ay) == aNodeVal)
-			{
-				a3DCoords(ax, ay, 0) = mPoints[i](0);
-				a3DCoords(ax, ay, 1) = mPoints[i](1);
-				a3DCoords(ax, ay, 2) = mPoints[i](2);
-				a3DCoords(ax, ay, 3) = mPoints[i](3);
-			}
-	}
-
-}
-
-void CMesh::projectToImageJ(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue, int aJoint, int xoffset, int yoffset)
-{
-
-	int I[4];
-	CVector<float> aPoint(3);
-	int ax, ay, bx, by, cx, cy;
-	int Size = (*this).GetMeshSize();
-	int j;
-
-	int det;
-
-	float X, Y, Z;
-
-	for (int i = 0; i < Size; i++)
-	{
-		(*this).GetPatch(i, I[0], I[1], I[2]);
-		j = 0;
-		// Test if patch is visible ...
-		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
-		(*this).projectPoint(P, X, Y, Z, ax, ay);
-		ax -= xoffset; ay -= yoffset;
-		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
-		(*this).projectPoint(P, X, Y, Z, bx, by);
-		bx -= xoffset; by -= yoffset;
-		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
-		(*this).projectPoint(P, X, Y, Z, cx, cy);
-		cx -= xoffset; cy -= yoffset;
-
-		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
-
-		{
-			if (((*this).GetJointID(I[0]) == aJoint) || ((*this).GetJointID(I[1]) == aJoint) || ((*this).GetJointID(I[2]) == aJoint))
-			{
-				for (j = 0; j < 3; j++)
-				{
-					(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-					bx -= xoffset; by -= yoffset;
-
-					if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-						aImage.drawLine(ax, ay, bx, by, aLineValue);
-					ax = bx;
-					ay = by;
-				}
-				j = 0;
-				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-				bx -= xoffset; by -= yoffset;
-				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-					aImage.drawLine(ax, ay, bx, by, aLineValue);
-			}
-		}
-	}
-}
-
-// projectSurface
-void CMesh::projectSurface(CMatrix<float>& aImage, CMatrix<float>& P, int xoffset, int yoffset)
-{
-	//aImage = 0;
-
-	CMatrix<float> ImageP = aImage;
-
-	for (int k = 0; k <= (*this).joints(); k++)
-	{
-		ImageP = 0;
-		projectToImageJ(ImageP, P, 1, k, xoffset, yoffset);
-
-		for (int i = 0; i < ImageP.xSize(); i++)
-			ImageP(i, 0) = 0;
-		for (int i = 0; i < ImageP.ySize(); i++)
-			ImageP(0, i) = 0;
-		int aSize = ImageP.size();
-		for (int i = 0; i < aSize; i++)
-			if (ImageP.data()[i] == 0)
-			{
-				int y = i / ImageP.xSize();
-				int x = i - ImageP.xSize()*y;
-				ImageP.connectedComponent(x, y);
-				break;
-			}
-		// Fill in ...
-		for (int i = 0; i < aSize; i++)
-		{
-			if (ImageP.data()[i] == 0) aImage.data()[i] = 255;
-		}
-	}
-}
-
-std::vector<CMatrix<double> > CMesh::readShapeSpaceEigens(const double* eigenVectorsIn, int numEigenVectors, int nPoints)
-{
-	std::vector<CMatrix<double> > eigenVectors(numEigenVectors);
-	int dimD = 3;
-
-	for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
-	{
-		eigenVectors[i0].setSize(nPoints, dimD);
-	}
-	int n = 0;
-	for (int col = 0; col < dimD; col++)
-		for (int row = 0; row < nPoints; row++)
-			for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
-			{
-				eigenVectors[i0](row, col) = eigenVectorsIn[n];
-				n++;
-			}
-	return eigenVectors;
-}
-
-std::vector<CMatrix<double> > CMesh::readShapeSpaceEigens(std::string fileName, int numEigenVectors)
-{
-	string path = fileName;
-	ifstream loadFile;
-	loadFile.open(path.c_str());
-	//reading only first four columns here
-	char fullLine[10000];
-	char(*c)[500] = new char[numEigenVectors][500];
-	std::vector<CMatrix<double> > eigenVectors(numEigenVectors);
-	for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
-	{
-		eigenVectors[i0].setSize(EVALUATE_POINTS_NUM, 3);
-		eigenVectors[i0] = 0;
-	}
-	unsigned int row = 0, col = 0;
-	unsigned totalLines = 1;
-	int noPts = 0;
-	while (!loadFile.getline(fullLine, 10000).eof())
-	{
-		if (fullLine[0] == '#')
-		{	//first start line with comments
-			int totalRws = 0, dimD = 0;
-			sscanf(fullLine, "# %d ( %d x %d )", &totalRws, &noPts, &dimD);
-			continue;
-		}
-		sscanf(fullLine, "%s%s%s%s%s%*s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
-			&c[0], &c[1], &c[2], &c[3],
-			&c[4], &c[5], &c[6], &c[7], &c[8], &c[9],
-			&c[10], &c[11], &c[12], &c[13],
-			&c[14], &c[15], &c[16], &c[17], &c[18], &c[19]);
-		for (unsigned int i0 = 0; i0 < numEigenVectors; i0++)
-		{
-			eigenVectors[i0](row, col) = atof(c[i0]);
-		}
-		row++;
-		if (row >= noPts)
-		{
-			row = 0; col++;
-			if (col == 3) col = 0;
-		}
-		totalLines++;
-	}
-	loadFile.close();
-	delete[] c;
-	return eigenVectors;
-}
-
 int CMesh::shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors)
 {
 	unsigned int noPts = mPoints.size();
@@ -1939,14 +1365,13 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 {
 	using miniBLAS::Vertex;
-	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = eigenVectorsIn;
+	const Vertex *__restrict pEvec = &(*evecCache)[0];
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
@@ -1981,16 +1406,15 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const 
 	}
 }
 
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn)
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
 	using miniBLAS::Vertex;
-	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
 	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = eigenVectorsIn;
+	const Vertex *__restrict pEvec = &(*evecCache)[0];
 	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
@@ -2028,16 +1452,15 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 		vPoints[row].assign(newval);
 	}
 }
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const miniBLAS::Vertex *eigenVectorsIn, const char *__restrict validMask)
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const char *__restrict validMask)
 {
 	using miniBLAS::Vertex;
-	const uint32_t numEigenVectors = 20;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
 	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = eigenVectorsIn;
+	const Vertex *__restrict pEvec = &(*evecCache)[0];
 	for (uint32_t row = 0, vldIdx = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
@@ -2210,42 +1633,6 @@ int CMesh::updateJntPos()
 		mJoint(i0 + 1).setPoint(jPos);
 	}
 	return 1;
-}
-
-static void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
-{
-	int32_t a = 0;
-	const int32_t off1 = 1 << step, off2 = 2 << step;
-	const int32_t r0 = 1 << (step - 1), r1 = off1 + r0, r2 = off2 + r0;
-	const int32_t adder = 6 * r0;
-	for (int32_t times = (cnt + r0 - 1) / adder; times--; a += adder)
-	{
-		ptr[a +    0] = _mm_add_ps(ptr[a +    0], ptr[a + r0]);
-		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
-		ptr[a + off2] = _mm_add_ps(ptr[a + off2], ptr[a + r2]);
-	}
-	switch (((cnt - a) + r0 - 1) / r0)
-	{
-	case 5:
-		ptr[a +    0] = _mm_add_ps(ptr[a +    0], ptr[a + off2]);
-	case 4:
-		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
-	case 3:
-		ptr[a +    0] = _mm_add_ps(ptr[a +    0], ptr[a + off1]);
-	case 2:
-		ptr[a +    0] = _mm_add_ps(ptr[a +    0], ptr[a + r0]);
-	case 1:
-		a++;
-		break;
-	case 0:
-		a = cnt - step;
-	default://wrong
-		printf("seems wrong here");
-		break;
-	}
-	if (a <= 1)
-		return;
-	sumVec(ptr, a, step + 1);
 }
 
 void CMesh::updateJntPosEx()
@@ -2579,4 +1966,214 @@ void CMesh::getWeightsinBuffer(char *buffer, int ptNo)
 		wtStr += buffer;
 	}
 	strcpy(buffer, wtStr.c_str());
+}
+
+void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
+{
+	int I[4];
+	CVector<float> aPoint(3);
+	int ax, ay, bx, by, cx, cy;
+	int Size = (*this).GetMeshSize();
+	int j;
+	int det;
+	float X, Y, Z;
+	//cout << Size << endl;
+	for (int i = 0; i < Size; i++)
+	{
+		(*this).GetPatch(i, I[0], I[1], I[2]);
+		j = 0;
+		// Test if patch is visible ...
+		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
+		(*this).projectPoint(P, X, Y, Z, ax, ay);
+		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
+		(*this).projectPoint(P, X, Y, Z, bx, by);
+		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
+		(*this).projectPoint(P, X, Y, Z, cx, cy);
+
+		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
+
+		if (det < 0.001)
+		{
+			for (j = 0; j < 3; j++)
+			{
+				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
+
+				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
+					aImage.drawLine(ax, ay, bx, by, aLineValue);
+				ax = bx;
+				ay = by;
+			}
+			j = 0;
+			(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
+			if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
+				aImage.drawLine(ax, ay, bx, by, aLineValue);
+		}
+	}
+}
+
+void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineVal, int aNodeVal)
+{
+	projectToImage(aImage, P, aLineVal);
+	projectPointsToImage(aImage, P, aNodeVal);
+}
+
+void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB)
+{
+	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
+	projectToImage(aMesh, P, 255);
+	int aSize = aMesh.size();
+	int a2Size = 2 * aSize;
+	for (int i = 0; i < aSize; i++)
+		if (aMesh.data()[i] == 255)
+		{
+			aImage.data()[i] = aLineR;
+			aImage.data()[i + aSize] = aLineG;
+			aImage.data()[i + a2Size] = aLineB;
+		}
+}
+
+void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB, int aNodeR, int aNodeG, int aNodeB)
+{
+	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
+	projectToImage(aMesh, P, 255, 128);
+	int aSize = aMesh.size();
+	int a2Size = 2 * aSize;
+	for (int i = 0; i < aSize; i++)
+		if (aMesh.data()[i] == 255)
+		{
+			aImage.data()[i] = aLineR;
+			aImage.data()[i + aSize] = aLineG;
+			aImage.data()[i + a2Size] = aLineB;
+		}
+		else if (aMesh.data()[i] == 128)
+		{
+			aImage.data()[i] = aNodeR;
+			aImage.data()[i + aSize] = aNodeG;
+			aImage.data()[i + a2Size] = aNodeB;
+		}
+}
+
+// projectPointsToImage
+void CMesh::projectPointsToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aNodeVal)
+{
+	int ax, ay;
+	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
+	projectToImage(aMesh, P, aNodeVal);
+
+	int Size = (*this).GetPointSize();
+	for (int i = 0; i < Size; i++)
+	{
+		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
+		if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
+			if (aMesh(ax, ay) == aNodeVal)
+				aImage(ax, ay) = aNodeVal;
+	}
+}
+
+void CMesh::projectPointsToImage(CTensor<float>& a3DCoords, CMatrix<float>& P)
+{
+	int ax, ay;
+	int aNodeVal = 39;
+
+	CMatrix<float> aMesh(a3DCoords.xSize(), a3DCoords.ySize(), 0);
+	projectToImage(aMesh, P, aNodeVal);
+
+	int Size = GetPointSize();
+	for (int i = 0; i < Size; i++)
+	{
+		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
+		if (ax >= 0 && ay >= 0 && ax < a3DCoords.xSize() && ay < a3DCoords.ySize())
+			if (aMesh(ax, ay) == aNodeVal)
+			{
+				a3DCoords(ax, ay, 0) = mPoints[i](0);
+				a3DCoords(ax, ay, 1) = mPoints[i](1);
+				a3DCoords(ax, ay, 2) = mPoints[i](2);
+				a3DCoords(ax, ay, 3) = mPoints[i](3);
+			}
+	}
+
+}
+
+void CMesh::projectToImageJ(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue, int aJoint, int xoffset, int yoffset)
+{
+
+	int I[4];
+	CVector<float> aPoint(3);
+	int ax, ay, bx, by, cx, cy;
+	int Size = (*this).GetMeshSize();
+	int j;
+	int det;
+	float X, Y, Z;
+
+	for (int i = 0; i < Size; i++)
+	{
+		(*this).GetPatch(i, I[0], I[1], I[2]);
+		j = 0;
+		// Test if patch is visible ...
+		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
+		(*this).projectPoint(P, X, Y, Z, ax, ay);
+		ax -= xoffset; ay -= yoffset;
+		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
+		(*this).projectPoint(P, X, Y, Z, bx, by);
+		bx -= xoffset; by -= yoffset;
+		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
+		(*this).projectPoint(P, X, Y, Z, cx, cy);
+		cx -= xoffset; cy -= yoffset;
+
+		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
+
+		{
+			if (((*this).GetJointID(I[0]) == aJoint) || ((*this).GetJointID(I[1]) == aJoint) || ((*this).GetJointID(I[2]) == aJoint))
+			{
+				for (j = 0; j < 3; j++)
+				{
+					(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
+					bx -= xoffset; by -= yoffset;
+
+					if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
+						aImage.drawLine(ax, ay, bx, by, aLineValue);
+					ax = bx;
+					ay = by;
+				}
+				j = 0;
+				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
+				bx -= xoffset; by -= yoffset;
+				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
+					aImage.drawLine(ax, ay, bx, by, aLineValue);
+			}
+		}
+	}
+}
+
+// projectSurface
+void CMesh::projectSurface(CMatrix<float>& aImage, CMatrix<float>& P, int xoffset, int yoffset)
+{
+	//aImage = 0;
+
+	CMatrix<float> ImageP = aImage;
+
+	for (int k = 0; k <= (*this).joints(); k++)
+	{
+		ImageP = 0;
+		projectToImageJ(ImageP, P, 1, k, xoffset, yoffset);
+
+		for (int i = 0; i < ImageP.xSize(); i++)
+			ImageP(i, 0) = 0;
+		for (int i = 0; i < ImageP.ySize(); i++)
+			ImageP(0, i) = 0;
+		int aSize = ImageP.size();
+		for (int i = 0; i < aSize; i++)
+			if (ImageP.data()[i] == 0)
+			{
+				int y = i / ImageP.xSize();
+				int x = i - ImageP.xSize()*y;
+				ImageP.connectedComponent(x, y);
+				break;
+			}
+		// Fill in ...
+		for (int i = 0; i < aSize; i++)
+		{
+			if (ImageP.data()[i] == 0) aImage.data()[i] = 255;
+		}
+	}
 }

@@ -1,24 +1,20 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
-#include <armadillo>
-
-#define USE_SSE
-#define USE_SSE2
-#define USE_SSE4
 
 #include "miniBLAS.hpp"
 
 namespace miniBLAS
 {
 
+struct NNResult;
+
 template<typename CHILD>
 class NNTreeBase
 {
 protected:
-	miniBLAS::VertexVec tree[8];
-	miniBLAS::VertexVec ntree[8];
+	VertexVec tree[8];
+	VertexVec ntree[8];
 	uint32_t ptCount;
 	inline int judgeIdx(const Vertex& v) const
 	{
@@ -31,15 +27,14 @@ public:
 	void searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const;
 	void searchOld(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
 	void search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
-	void searchOnAngle(const Vertex *pVert, const Vertex *pNorm, const uint32_t count, const float angle, int *idxs, float *dists, 
-		uint8_t *cnts, float *minds) const;
+	NNResult searchOnAngle(const VertexVec& pt, const VertexVec& norm, const uint32_t count, const float angle) const;
 	uint32_t PTCount() const { return ptCount + 7; };
 };
 
 class kdNNTree : public NNTreeBase<kdNNTree>
 {
-	friend NNTreeBase;
 protected:
+	friend NNTreeBase;
 	inline int judgeIdx(const Vertex& v) const
 	{
 	#ifdef USE_SSE
@@ -53,8 +48,8 @@ protected:
 
 class NNTree : public NNTreeBase<NNTree>
 {
-	friend NNTreeBase;
 protected:
+	friend NNTreeBase;
 	inline int judgeIdx(const Vertex& v) const
 	{
 		return 0;
@@ -62,7 +57,81 @@ protected:
 };
 
 
-using std::vector;
+struct NNResult
+{
+private:
+	template<typename T>
+	friend class NNTreeBase;
+	uint32_t baseSize, objSize;
+	NNResult(const uint32_t oSize, const uint32_t bSize) : objSize(oSize), baseSize(bSize)
+	{
+		clean();
+		alloc();
+	};
+	void alloc()
+	{
+		idxs = new int32_t[objSize];
+		dists = new float[objSize];
+		mdists = new float[baseSize];
+		mthcnts = new uint8_t[baseSize];
+	}
+	void clean()
+	{
+		if (idxs != nullptr)
+			delete[] idxs;
+		if (dists != nullptr)
+			delete[] dists;
+		if (mdists != nullptr)
+			delete[] mdists;
+		if (mthcnts != nullptr)
+			delete[] mthcnts;
+	};
+public:
+	int32_t *idxs = nullptr;
+	float *dists = nullptr;
+	float *mdists = nullptr;
+	uint8_t *mthcnts = nullptr;
+	NNResult(const NNResult& o)
+	{
+		*this = o;
+	}
+	NNResult(NNResult&& o) : baseSize(o.baseSize), objSize(o.objSize), idxs(o.idxs), dists(o.dists), mdists(o.mdists), mthcnts(o.mthcnts)
+	{
+		o.idxs = nullptr;
+		o.dists = nullptr;
+		o.mdists = nullptr;
+		o.mthcnts = nullptr;
+	}
+	~NNResult()
+	{
+		clean();
+	}
+
+	NNResult & operator = (const NNResult& o)
+	{
+		assert(this != &o);
+		clean();
+		baseSize = o.baseSize; objSize = o.objSize;
+		alloc();
+		memcpy(idxs, o.idxs, sizeof(int32_t) * baseSize);
+		memcpy(dists, o.dists, sizeof(float) * baseSize);
+		memcpy(mdists, o.mdists, sizeof(float) * objSize);
+		memcpy(mthcnts, o.mthcnts, sizeof(uint8_t) * objSize);
+		return *this;
+	}
+	NNResult & operator = (NNResult&& o)
+	{
+		assert(this != &o);
+		clean();
+		baseSize = o.baseSize; objSize = o.objSize;
+		idxs = o.idxs; o.idxs = nullptr;
+		dists = o.dists; o.dists = nullptr;
+		mdists = o.mdists; o.mdists = nullptr;
+		mthcnts = o.mthcnts; o.mthcnts = nullptr;
+		return *this;
+	}
+};
+
 
 template<typename CHILD>
 void NNTreeBase<CHILD>::init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints)
@@ -320,20 +389,17 @@ void NNTreeBase<CHILD>::search(const Vertex *pVert, const uint32_t count, int *_
 }
 
 template<typename CHILD>
-void NNTreeBase<CHILD>::searchOnAngle(const Vertex *pVert, const Vertex *pNorm, const uint32_t count, const float angle, int *idxs, float *dists,
-	uint8_t *cnts, float *minds) const
+NNResult NNTreeBase<CHILD>::searchOnAngle(const VertexVec& pt, const VertexVec& norm, const uint32_t count, const float angle) const
 {
-	const uint32_t cntV = (count + 7) / 4, cntP = PTCount() / 4;
-	Vertex *tmp2 = new Vertex[cntP];
-	memset(tmp2, 0x7f, cntP * sizeof(Vertex));
-	memset(cnts, 0x0, ptCount);
-	Vertex *tmp = new Vertex[cntV];
-	float *pFtmp = tmp[0], *pFTmp2 = tmp2[0];
-	const __m256 distMask = _mm256_set1_ps(1e10f), mincos = _mm256_set1_ps(cos(3.1415926 * angle / 180));
+	NNResult ret(count, PTCount());
+	int *idxs = ret.idxs; float *dists = ret.dists;
+	memset(ret.mdists, 0x7f, PTCount() * sizeof(float));
+	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angle / 180));
+	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
 	for (uint32_t a = count; a--; ++pVert, ++pNorm)
 	{
 		//object vertex being searched
-		const Vertex vObj = *pVert; const __m256 mObj = _mm256_broadcast_ps((__m128*)&vObj), mNorm = _mm256_broadcast_ps((__m128*)pNorm);
+		const Vertex vObj = *pVert; const __m256 mObj = _mm256_broadcast_ps((__m128*)pVert), mNorm = _mm256_broadcast_ps((__m128*)pNorm);
 		//find proper subtree
 		const auto tid = judgeIdx(vObj);
 		const auto& part = tree[tid];
@@ -418,27 +484,19 @@ void NNTreeBase<CHILD>::searchOnAngle(const Vertex *pVert, const Vertex *pNorm, 
 		{
 			IDX = theIDX[idx1]; DIST = theDIST[idx1];
 		}
-		*pFtmp++ = DIST;
+		*dists++ = DIST;
 		if (DIST > 1e4f)
 			*idxs++ = 65536;
 		else
 		{
 			*idxs++ = IDX;
-			cnts[IDX]++;
-			if (pFTmp2[IDX] > DIST)
-				pFTmp2[IDX] = DIST;
+			ret.mthcnts[IDX]++;
+			DIST *= 1.2f;//1.1*1.1
+			if (ret.mdists[IDX] > DIST)
+				ret.mdists[IDX] = DIST;
 		}
 	}
-	float *pTmp = tmp[0], *pTmp2 = tmp2[0];
-	for (uint32_t a = cntV / 2; a--; pTmp += 8)
-		_mm256_store_ps(pTmp, _mm256_sqrt_ps(_mm256_load_ps(pTmp)));
-	const __m256 mul1_1 = _mm256_set1_ps(1.1f);
-	for (uint32_t a = cntP / 2; a--; pTmp2 += 8)
-		_mm256_store_ps(pTmp2, _mm256_add_ps(_mm256_sqrt_ps(_mm256_load_ps(pTmp2)), mul1_1));
-	memcpy(dists, tmp, count * sizeof(float));
-	memcpy(minds, tmp2, ptCount * sizeof(float));
-	delete[] tmp;
-	delete[] tmp2;
+	return ret;
 }
 
 }

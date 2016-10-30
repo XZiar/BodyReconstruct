@@ -546,7 +546,6 @@ bool fitMesh::loadScan(CScan& scan)
 {
 	PointCloudT::Ptr cloud_tmp(new PointCloudT);
 	pcl::PolygonMesh mesh;
-	const bool isYFlip = mode;
 	string fname = dataDir + baseFName;
 	if (mode)
 		fname += ".ply";
@@ -570,7 +569,7 @@ bool fitMesh::loadScan(CScan& scan)
 	scan.points_orig.resize(scan.nPoints, 3);
 	scan.normals_orig.resize(scan.nPoints, 3);
 	uint32_t idx = 0;
-	if (isYFlip)
+	if (mode)
 	{
 		for (const PointT& pt : cloud_tmp->points)//m 2 mm
 		{
@@ -583,8 +582,8 @@ bool fitMesh::loadScan(CScan& scan)
 	{
 		for (const PointT& pt : cloud_tmp->points)//m 2 mm
 		{
-			scan.points_orig.row(idx) = arma::rowvec({ pt.x, pt.y, pt.z }) * 1000;
-			scan.normals_orig.row(idx) = arma::rowvec({ pt.normal_x, pt.normal_y, pt.normal_z });
+			scan.points_orig.row(idx) = arma::rowvec({ -pt.y, pt.z, -pt.x }) * 1000;
+			scan.normals_orig.row(idx) = arma::rowvec({ -pt.normal_y, pt.normal_z, -pt.normal_x });
 			idx++;
 		}
 	}
@@ -742,10 +741,9 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     arma::mat eig_vec;
     arma::vec eig_val;
     arma::mat scpoint;
-
     {
 		baseShift = meanpoints = mean(scanbody.points,0);
-        scpoint = scanbody.points.each_row() - meanpoints;
+		scpoint = scanbody.points.each_row() - meanpoints;
         arma::mat sctmppoint = scpoint.t()*scpoint;
         if(! arma::eig_sym(eig_val,eig_vec,sctmppoint))
         {
@@ -765,7 +763,6 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
             return;
         }
     }
-
     arma::mat R = (eig_vec * Rsc.i()).t();
 
     double dDepth = 0;
@@ -786,7 +783,6 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     meanpoints = mean(tempbody.points,0);
     meanpoints(1) = dDepth;
     meanpoints(2) += min_t(2) - min_s(2)/s;//align to the foot by moving
-    printMat("###after YZfix, shift-meanpoints\n",meanpoints);
 
     scpoint /= s;
     scanbody.points = scpoint.each_row() + meanpoints;
@@ -794,6 +790,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
 		rotateMat = R;
 		totalScale = s;
 		totalShift = meanpoints;
+		const arma::mat cpos = (-baseShift) * (R / totalScale);
+		camPos.assign(cpos(0), cpos(1), cpos(2));
 	}
     arma::mat T(4, 4, arma::fill::zeros);
     T.submat(0,0,2,2) = R/s;
@@ -815,16 +813,6 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
 
 	scanbody.prepare();
 	scanbody.nntree.init(scanbody.vPts, scanbody.vNorms, scanbody.nPoints);
-
-    //show the initial points
-    if(true)
-    {
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-		tempbody.calcNormals();
-		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
-		showPoints(cloud, scanbody.vPts, scanbody.vNorms, pcl::PointXYZRGB(192, 0, 0));
-        viewer.showCloud(cloud);
-    }
 }
 void fitMesh::rigidAlignTemplate2ScanLandmarks()
 {
@@ -846,12 +834,10 @@ void fitMesh::DirectRigidAlign(CScan& scan)
 	scan.nntree.init(scan.vPts, scan.vNorms, scan.nPoints);
 }
 
-void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solveS, uint32_t iter)
+void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solveS, const uint32_t iter)
 {
     //Initialization of the optimizer
     vector<int> idxHand;//the index of hands
-    double eps_err = 1e-3;
-    double errPrev = 0;
     double err=0;
 	uint32_t sumVNN;
 	tSPose = tSShape = tMatchNN = 0;
@@ -865,14 +851,15 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
 		cout << "cv kd tree build, scan points number: " << pointscv.rows << endl;
 	}
 	*/
-	sumVNN = updatePoints(scan, idxsNN_, isValidNN_, err);
-    showResult(scan, false);
-	errPrev = err + eps_err + 1;
     //Optimization Loop
    // while(fabs(err-errPrev)>eps_err)
-	while(iter--)
+	for(uint32_t a = iter; a--;)
 	{
-        errPrev = err;//update the error
+		/*log(0.6) = -0.511 ===> ratio of angle range: 1.511-->1.0*/
+		double angLim = angleLimit * (1 - std::log(1 - 0.4 * a / iter));
+		sumVNN = updatePoints(scan, angLim, idxsNN_, isValidNN_, err);
+		showResult(scan, false);
+
 		const auto scanCache = isFastCost ? 
 			shuffleANDfilter(scan.vPts, tempbody.nPoints, idxsNN_.ptr<uint32_t>(), isValidNN_.memptr()) :
 			shuffleANDfilter(scan.vPts, tempbody.nPoints, idxsNN_.ptr<uint32_t>());
@@ -889,14 +876,14 @@ void fitMesh::fitShapePose(const CScan& scan, const bool solveP, const bool solv
 			solveShape(scanCache, isValidNN_, curMParam);
 		}
 		cout << "========================================\n";
-		sumVNN = updatePoints(scan, idxsNN_, isValidNN_, err);
-        showResult(scan, false);
 		printArray("pose param", curMParam.pose);
 		printArray("shape param", curMParam.shape);
 		cout << "----------------------------------------\n";
     }
+	sumVNN = updatePoints(scan, angleLimit, idxsNN_, isValidNN_, err);
+	showResult(scan, false);
     //wait until the window is closed
-	cout << "optimization finished, close the window to quit\n";
+	cout << "optimization finished\n";
 	if (solveP)
 		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	if (solveS)
@@ -922,20 +909,6 @@ arColIS fitMesh::checkAngle(const arma::mat &normals_knn, const arma::mat &norma
 		*pRes++ = *pTheta++ >= mincos ? 1 : 0;
     }
     return result;
-}
-arColIS fitMesh::checkAngle(const miniBLAS::VertexVec& mthNorms, const miniBLAS::VertexVec& tpNorms, const double angle_thres)
-{
-	const uint32_t rowcnt = mthNorms.size();
-	arColIS result(rowcnt, arma::fill::ones);
-
-	const float mincos = cos(3.1415926 * angle_thres / 180);
-
-	auto *__restrict pRes = result.memptr();
-	for (uint32_t i = 0; i < rowcnt; i++)
-	{
-		*pRes++ = (mthNorms[i] % tpNorms[i]) >= mincos ? 1 : 0;
-	}
-	return result;
 }
 
 void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr)
@@ -966,7 +939,7 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	else
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<MovementSofter, ceres::CENTRAL, POSPARAM_NUM, POSPARAM_NUM>
-			(new MovementSofter(modelParams.back(), lastErr / POSPARAM_NUM));
+			(new MovementSofter(modelParams.back(), sqrt(lastErr / POSPARAM_NUM) / 2));
 		problem.AddResidualBlock(soft_function, NULL, pose);
 	}
     Solver::Options options;
@@ -1033,7 +1006,25 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
-uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err)
+arColIS fitMesh::nnFilter(const miniBLAS::NNResult& res, const VertexVec& scNorms, const double angLim)
+{
+	const float mincos = cos(3.1415926 * angLim / 180);
+	arColIS result(tempbody.nPoints, arma::fill::zeros);
+	auto *__restrict pRes = result.memptr();
+	for (uint32_t i = 0; i < tempbody.nPoints; i++)
+	{
+		const int idx = res.idxs[i];
+		if (idx > 65530)
+			continue;
+		if (res.mthcnts[idx] > 3)
+			if (res.mdists[idx] < res.dists[i])//not mininum
+				continue;
+		if ((scNorms[idx] % tempbody.vNorms[i]) >= mincos)
+			pRes[i] = 1;
+	}
+	return result;
+}
+uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err)
 {
 	tempbody.updPoints(shapepose.getModelFast(curMParam.shape, curMParam.pose));
 	tempbody.calcFaces();
@@ -1047,11 +1038,8 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		t1 = getCurTime();
 		cv::Mat cvPointsSM = armaTOcv(tempbody.points);
 		scan.kdtree->knnSearch(cvPointsSM, idxsNNOLD, distNNOLD, 1);//the distance is L2 which is |D|^2
-		cv::sqrt(distNNOLD, distNNOLD);
 		t2 = getCurTime();
-		char tmp[256];
-		sprintf(tmp, "cvFLANN uses %lld ms.\n", t2 - t1);
-		logger.log(tmp, true);
+		logger.log(true, "cvFLANN uses %lld ms.\n", t2 - t1);
 		if (idxsNNOLD.rows != tempbody.nPoints)
 		{
 			cout << "error of the result of knn search \n";
@@ -1061,51 +1049,24 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 	}
 
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S); int *__restrict pidxNN = idxsNN.ptr<int>(0);
+	//dist^2 in fact
 	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1); float *__restrict pdistNN = distNN.ptr<float>(0);
-	float *minDists = new float[scan.nntree.PTCount()];
-	uint8_t *mthCnts = new uint8_t[scan.nntree.PTCount()];
+	arColIS isValidNN;
 	{
 		t1 = getCurTime();
 
-		if (isAgLimNN)
-			scan.nntree.searchOnAngle(&tempbody.vPts[0], &tempbody.vNorms[0], tempbody.nPoints, angleLimit, pidxNN, pdistNN, mthCnts, minDists);
-		else
-			scan.nntree.search(&tempbody.vPts[0], tempbody.nPoints, pidxNN, pdistNN);
+		auto nnres = scan.nntree.searchOnAngle(tempbody.vPts, tempbody.vNorms, tempbody.nPoints, angLim*1.1f);
+		//scan.nntree.search(&tempbody.vPts[0], tempbody.nPoints, pidxNN, pdistNN);
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
-		char tmp[256];
-		sprintf(tmp, "avxNN uses %lld ms.\n", t2 - t1);
-		logger.log(tmp, true);
+		logger.log(true, "avxNN uses %lld ms.\n", t2 - t1);
+		memcpy(pidxNN, nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
+		memcpy(pdistNN, nnres.dists, sizeof(float) * tempbody.nPoints);
+		isValidNN = nnFilter(nnres, scan.vNorms, angLim);
 	}
-
-	//get the normal of the 1-NN point in scan data
-	VertexVec mthNorms(tempbody.nPoints);
-	memset(&mthNorms[0], 0x0, tempbody.nPoints * sizeof(Vertex));
-	for (uint32_t i = 0; i < tempbody.nPoints; i++)
-	{
-		const int idx = pidxNN[i];
-		if (idx > 65530)
-			continue;
-		if (mthCnts[idx] > 3)
-		{
-			//printf("mindist=%f, pdist=%f  when i=%d, idx=%d\n", minDists[idx], pdistNN[i], i, idx);
-			if (minDists[idx] < pdistNN[i])//not mininum
-				continue;
-		}
-		if (idx < 0 || idx > scan.nPoints)
-		{
-			cout << "error idx when copy knn normal\n";
-			cin.ignore();
-			continue;
-		}
-		const arma::rowvec& obj = scan.normals.row(idx);
-		mthNorms[i].assign(obj[0], obj[1], obj[2]);
-	}
-	//chech angles between norms of (the nearest point of scan) AND (object point of tbody)
-	arColIS isValidNN = checkAngle(mthNorms, tempbody.vNorms, angleLimit);
+	
 	isValidNN = isValidNN % isVisible;
-	delete[] minDists; delete[] mthCnts;
 
 	uint32_t sumVNN = 0;
 	{//caculate total error
@@ -1123,54 +1084,43 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 		printf("valid nn number: %d , total error: %f\n", sumVNN, err);
 	}
 
-	//if(false)
+	FILE *fp = fopen("output.data", "wb");
+	if (fp != nullptr)
 	{
-		FILE *fp = fopen("output.data", "wb");
 		uint32_t cnt;
 		uint8_t type;
 		char name[16] = { 0 };
 		{
-			type = 0;
-			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "scan");
-			fwrite(name, sizeof(name), 1, fp);
-			cnt = scan.nPoints;
-			fwrite(&cnt, sizeof(cnt), 1, fp);
+			fwrite(&camPos, sizeof(Vertex), 1, fp);
+		}
+		{
+			type = 0; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "scan"); fwrite(name, sizeof(name), 1, fp);
+			cnt = scan.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
 			fwrite(&scan.vPts[0], sizeof(Vertex), cnt, fp);
 		}
 		{
-			type = 0;
-			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "temp");
-			fwrite(name, sizeof(name), 1, fp);
-			cnt = tempbody.nPoints;
-			fwrite(&cnt, sizeof(cnt), 1, fp);
+			type = 0; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "temp"); fwrite(name, sizeof(name), 1, fp);
+			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
 			fwrite(&tempbody.vPts[0], sizeof(Vertex), cnt, fp);
 		}
 		if (useFLANN)
 		{
-			type = 1;
-			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "cvFLANN");
-			fwrite(name, sizeof(name), 1, fp);
-			cnt = tempbody.nPoints;
-			fwrite(&cnt, sizeof(cnt), 1, fp);
+			type = 1; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "cvFLANN"); fwrite(name, sizeof(name), 1, fp);
+			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
 			fwrite(idxsNNOLD.ptr<int>(0), sizeof(int), cnt, fp);
 		}
 		{
-			type = 1;
-			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "avxNN");
-			fwrite(name, sizeof(name), 1, fp);
-			cnt = tempbody.nPoints;
-			fwrite(&cnt, sizeof(cnt), 1, fp);
+			type = 1; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "avxNN"); fwrite(name, sizeof(name), 1, fp);
+			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
 			fwrite(idxsNN.ptr<int>(0), sizeof(int), cnt, fp);
 		}
 		{
-			type = 1;
-			fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "validKNN");
-			fwrite(name, sizeof(name), 1, fp);
+			type = 1; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
 			int *tmp = new int[tempbody.nPoints];
 			const int *pIdx = idxsNN.ptr<int>(0);
 			auto pValid = isValidNN.memptr();
@@ -1186,7 +1136,6 @@ uint32_t fitMesh::updatePoints(const CScan& scan, cv::Mat &idxsNN_rtn, arColIS &
 
 	idxsNN_rtn = idxsNN;
 	isValidNN_rtn = isValidNN;
-
 	return sumVNN;
 }
 void fitMesh::showResult(const CScan& scan, const bool isNN)
@@ -1226,7 +1175,7 @@ void fitMesh::init(const std::string& baseName, const bool isOnce)
 	baseFName = baseName;
 	isFastCost = yesORno("use fast cost func?");
 	angleLimit = isVtune ? 30 : inputNumber("angle limit");
-	isAgLimNN = yesORno("apply angle limit to NN-search");
+	//isAgLimNN = yesORno("apply angle limit to NN-search");
 }
 void fitMesh::mainProcess()
 {
@@ -1235,6 +1184,17 @@ void fitMesh::mainProcess()
 	CScan& firstScan = scanFrames.back();
 	loadScan(firstScan);
 	rigidAlignTemplate2ScanPCA(firstScan);
+	{
+		coef.values.resize(4);
+		coef.values[0] = camPos.x;
+		coef.values[1] = camPos.y;
+		coef.values[2] = camPos.z;
+		coef.values[3] = 30;
+		viewer.runOnVisualizationThreadOnce([&](pcl::visualization::PCLVisualizer& v)
+		{
+			v.addSphere(coef);
+		});
+	}
 	fitShapePose(firstScan);
 	modelParams.push_back(curMParam);
 	if (!isVtune)
@@ -1250,7 +1210,7 @@ void fitMesh::mainProcess()
 			break;
 		//rigid align the scan
 		DirectRigidAlign(curScan);
-		fitShapePose(curScan, true, false, 3);
+		fitShapePose(curScan, true, false, 4);
 		modelParams.push_back(curMParam);
 	}
 	getchar();

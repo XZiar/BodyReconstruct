@@ -21,27 +21,9 @@ CShapePose::CShapePose()
 	initMesh_bk.prepareData();
 }
 
-int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
+int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
 	const uint32_t numEigenVectors, double* pointsOut, double* jointsOut)
 {
-	// ************** Read Input ************** //
-	//string s = inputDir;
-	//if( (char)(*--s.end()) != '/' )
-	//s.append("/");
-	//NShow::mInputDir = s;
-
-#ifndef EXEC_FAST
-	cout << "Input dir: " << NShow::mInputDir << endl;
-#endif
-
-#ifndef EXEC_FAST
-	cout << "LOAD MESH...\n";
-#endif 
-
-#ifndef EXEC_FAST
-	cout << "semantic shape parameters: ";
-#endif
-
 	// Read object model
 	CMesh initMesh = initMesh_bk;
 
@@ -92,19 +74,11 @@ int CShapePose::getpose(/*const string inputDir, */const double* motionParamsIn,
 	// Fill in resulting points array
 	int nPoints = initMesh.GetPointSize();
 	for (int i = 0; i < nPoints; i++)
-	{
-		float x, y, z;
-		initMesh.GetPoint(i, x, y, z);
-		pointsOut[i] = x;
-		pointsOut[i + nPoints] = y;
-		pointsOut[i + 2 * nPoints] = z;
-	}
+		initMesh.GetPoint(i, pointsOut[i], pointsOut[i + nPoints], pointsOut[i + 2 * nPoints]);
 	return 0;
 }
 VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
 	// Read object model
 	CMesh mesh(initMesh_bk, nullptr);
 	Vertex vShape[5];
@@ -116,13 +90,11 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
+	mesh.fastShapeChangesToMesh_AVX(vShape);
 	return std::move(mesh.vPoints);
 }
 CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask) const
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
 	// Read object model
 	CMesh initMesh(initMesh_bk, nullptr);
 	Vertex vShape[5];
@@ -134,7 +106,7 @@ CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const ch
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	initMesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
+	initMesh.fastShapeChangesToMesh_AVX(vShape, validMask);
 	return initMesh;
 }
 VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn) const
@@ -197,9 +169,6 @@ VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__res
 }
 VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
-	
 	// Read object model
 	CMesh mesh(initMesh_bk, nullptr);
 
@@ -212,7 +181,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0]);
+	mesh.fastShapeChangesToMesh_AVX(vShape);
 
 	// update joints
 	mesh.updateJntPosEx();
@@ -241,9 +210,6 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 }
 VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask) const
 {
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
-
 	// Read object model
 	CMesh mesh(initMesh_bk, nullptr);
 
@@ -256,7 +222,7 @@ VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, cons
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape, &evecCache[0], validMask);
+	mesh.fastShapeChangesToMesh_AVX(vShape, validMask);
 
 	// update joints
 	mesh.updateJntPosEx();
@@ -284,56 +250,9 @@ VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, cons
 	return std::move(mesh.validPts);
 }
 
-void CShapePose::getModel(const double *shapeParamsIn, const double *poseParamsIn, arma::mat &points, arma::mat &joints)
-{
-	const double *eigenVectorsIn = evectors.memptr();/* nEigenVec x EVALUATE_POINTS_NUM(6449) x 3*/
-	const uint32_t numEigenVectors = evectors.n_rows;
-
-	const float *pEV = evalue[0];
-	double shapePara[SHAPEPARAM_NUM];
-	for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
-		shapePara[a] = shapeParamsIn[a] * pEV[a];
-
-	//For return data
-	points.zeros(EVALUATE_POINTS_NUM, 3);
-	double *pointsOut = points.memptr();/* EVALUATE_POINTS_NUM(6449) x 3*/
-	joints.zeros(25, 8);
-	double *jointsOut = joints.memptr();/* 24x8: jid directions_XYZ positions_XYZ jparent_id*/
-	getpose(poseParamsIn, shapePara, eigenVectorsIn, numEigenVectors, pointsOut, jointsOut);
-}
-
-void CShapePose::getModel(const arma::mat &shapeParam, const arma::mat &poseParam, arma::mat &points, arma::mat &joints)
-{
-	const double *poseParamsIn = poseParam.memptr();/* 31x1*/
-	const double *shapeParamsIn = shapeParam.memptr();/* 20x1*/
-	getModel(shapeParamsIn, poseParamsIn, points, joints);
-}
-
 void CShapePose::setEvectors(const arma::mat &evectorsIn)
 {
-	evectors = evectorsIn;
-
-	if (evectorsIn.n_rows != SHAPEPARAM_NUM || SHAPEPARAM_NUM != 20)
-	{
-		printf("evecctors should be 20 for optimization.\n\n");
-		getchar();
-		exit(-1);
-	}
-	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
-	evecCache.resize(rows * 64);//15+1 vertex for a row
-	float *pVert = evecCache[0];
-	//20 * x(rows*3)
-	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
-	for (uint32_t a = 0; a < rows; ++a)
-	{
-		for (uint32_t b = 0; b < 20; ++b)
-			*pVert++ = *px++;
-		for (uint32_t b = 0; b < 20; ++b)
-			*pVert++ = *py++;
-		for (uint32_t b = 0; b < 20; ++b)
-			*pVert++ = *pz++;
-		pVert += 4;
-	}
+	initMesh_bk.setShapeSpaceEigens(evectorsIn);
 }
 
 void CShapePose::setEvalues(const arma::mat & inEV)

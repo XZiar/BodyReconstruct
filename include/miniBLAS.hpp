@@ -29,6 +29,42 @@
 namespace miniBLAS
 {
 
+inline void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
+{
+	int32_t a = 0;
+	const int32_t off1 = 1 << step, off2 = 2 << step;
+	const int32_t r0 = 1 << (step - 1), r1 = off1 + r0, r2 = off2 + r0;
+	const int32_t adder = 6 * r0;
+	for (int32_t times = (cnt + r0 - 1) / adder; times--; a += adder)
+	{
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + r0]);
+		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
+		ptr[a + off2] = _mm_add_ps(ptr[a + off2], ptr[a + r2]);
+	}
+	switch (((cnt - a) + r0 - 1) / r0)
+	{
+	case 5:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + off2]);
+	case 4:
+		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
+	case 3:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + off1]);
+	case 2:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + r0]);
+	case 1:
+		a++;
+		break;
+	case 0:
+		a = cnt - step;
+	default://wrong
+		printf("seems wrong here");
+		break;
+	}
+	if (a <= 1)
+		return;
+	sumVec(ptr, a, step + 1);
+}
+
 inline void MatrixTranspose4x4(const __m256 l1, const __m256 l2, __m256& o1, __m256& o2)
 {
 	const __m256 n1 = _mm256_permute_ps(l1, _MM_SHUFFLE(3, 1, 2, 0))/*x1,z1,y1,w1;x2,z2,y2,w2*/;
