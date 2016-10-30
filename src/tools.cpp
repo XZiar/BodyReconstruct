@@ -88,7 +88,7 @@ arma::mat ctools::transAffine2D(arma::mat trmat, arma::mat src)
     dst.reshape(1,dst.n_cols*2);
     return dst;
 }
-///随机游走算法，在0-range之间随机选择n个整数
+//随机游走算法，在0-range之间随机选择n个整数
 vector<uint32_t> ctools::randperm(const uint32_t range, uint32_t n)
 {
     vector<uint32_t> rtRdNum;

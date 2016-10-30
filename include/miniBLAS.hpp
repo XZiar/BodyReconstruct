@@ -29,6 +29,42 @@
 namespace miniBLAS
 {
 
+inline void sumVec(__m128 *ptr, const int32_t cnt, const uint32_t step = 1)
+{
+	int32_t a = 0;
+	const int32_t off1 = 1 << step, off2 = 2 << step;
+	const int32_t r0 = 1 << (step - 1), r1 = off1 + r0, r2 = off2 + r0;
+	const int32_t adder = 6 * r0;
+	for (int32_t times = (cnt + r0 - 1) / adder; times--; a += adder)
+	{
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + r0]);
+		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
+		ptr[a + off2] = _mm_add_ps(ptr[a + off2], ptr[a + r2]);
+	}
+	switch (((cnt - a) + r0 - 1) / r0)
+	{
+	case 5:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + off2]);
+	case 4:
+		ptr[a + off1] = _mm_add_ps(ptr[a + off1], ptr[a + r1]);
+	case 3:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + off1]);
+	case 2:
+		ptr[a + 0] = _mm_add_ps(ptr[a + 0], ptr[a + r0]);
+	case 1:
+		a++;
+		break;
+	case 0:
+		a = cnt - step;
+	default://wrong
+		printf("seems wrong here");
+		break;
+	}
+	if (a <= 1)
+		return;
+	sumVec(ptr, a, step + 1);
+}
+
 inline void MatrixTranspose4x4(const __m256 l1, const __m256 l2, __m256& o1, __m256& o2)
 {
 	const __m256 n1 = _mm256_permute_ps(l1, _MM_SHUFFLE(3, 1, 2, 0))/*x1,z1,y1,w1;x2,z2,y2,w2*/;
@@ -71,6 +107,28 @@ inline __m256 Mat3x3_Mul2_Vec3(const __m128 ma0, const __m128 ma1, const __m128 
 }
 
 
+template<uint32_t N>
+struct AlignBase
+{
+	void* operator new(size_t size)
+	{
+		return malloc_align(size, N);
+	};
+	void operator delete(void *p)
+	{
+		free_align(p);
+	}
+	void* operator new[](size_t size)
+	{
+		return malloc_align(size, N);
+	};
+	void operator delete[](void *p)
+	{
+		free_align(p);
+	}
+};
+
+
 template<class T>
 struct AlignAllocator : std::allocator<T>
 {
@@ -90,7 +148,6 @@ public:
 	T* allocate(size_t n, const T *hint = 0)
 	{
 		T* ptr = new T[n];
-		//printf("allocate at %llx\n", ptr);
 		return ptr;
 	}
 	void deallocate(T *p, size_t n)
@@ -109,7 +166,7 @@ class ALIGN16 VertexI;
 
 static const uint32_t Vec4Align = 32;
 template<typename T>
-class ALIGN16 Vec4Base
+class ALIGN16 Vec4Base : public AlignBase<Vec4Align>
 {
 	static_assert(sizeof(T) == 4, "only 4-byte length type allowed");
 protected:
@@ -137,24 +194,6 @@ protected:
 	Vec4Base(const T x_, const T y_) :x(x_), y(y_) { };
 	Vec4Base(const T x_, const T y_, const T z_) :x(x_), y(y_), z(z_) { };
 	Vec4Base(const T x_, const T y_, const T z_, const T w_) :x(x_), y(y_), z(z_), w(w_) { };
-
-public:
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, Vec4Align);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
-	void* operator new[](size_t size)
-	{
-		return malloc_align(size, Vec4Align);
-	};
-	void operator delete[](void *p)
-	{
-		free_align(p);
-	}
 };
 
 
@@ -342,7 +381,7 @@ public:
 
 static const uint32_t SQMat4Align = 32;
 template<typename T, typename T2>
-class ALIGN32 SQMat4Base
+class ALIGN32 SQMat4Base : public AlignBase<SQMat4Align>
 {
 	static_assert(sizeof(T) == 16, "only 16-byte length type(for a row) allowed");
 	static_assert(sizeof(T2) == 32, "T2 should be twice of T");
@@ -389,23 +428,6 @@ protected:
 	SQMat4Base(const T2 xy_) :xy(xy_) { };
 	SQMat4Base(const T2 xy_, const T z_) :xy(xy_), z(z_) { };
 	SQMat4Base(const T2 xy_, const T2 zw_) :xy(xy_), zw(zw_) { };
-public:
-	void* operator new(size_t size)
-	{
-		return malloc_align(size, SQMat4Align);
-	};
-	void operator delete(void *p)
-	{
-		free_align(p);
-	}
-	void* operator new[](size_t size)
-	{
-		return malloc_align(size, SQMat4Align);
-	};
-	void operator delete[](void *p)
-	{
-		free_align(p);
-	}
 };
 
 using __m128x4 = __m128[4];

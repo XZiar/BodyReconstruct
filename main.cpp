@@ -34,7 +34,24 @@ int main(int argc, char *argv[])
 		if (para == "--vtune")
 			isVtune = true;
 	}
-    fitMesh meshFittor;
+    fitMesh meshFittor("../BodyReconstruct/data/");
+	//input object scan file
+	{
+		printf("FileName(number for one scan, letter for sequence): ");
+		int ret = getchar();
+		if (!(ret == 13 || ret == 10) && !isVtune)
+		{
+			getchar();
+			if (ret >= '0' && ret <= '9')
+				meshFittor.init(string("scan") + (char)ret, true);
+			else
+				meshFittor.init(string("/clips/clouds") + (char)ret, false);
+		}
+		else
+		{
+			meshFittor.init("scan", true);
+		}
+	}
     meshFittor.mainProcess();
 	printf("Finished!\n");
 	if(!isVtune)

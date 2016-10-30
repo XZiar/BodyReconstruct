@@ -95,13 +95,12 @@
     <ClCompile Include="shapemodel\paramMap.cpp" />
     <ClCompile Include="shapemodel\Show.cpp" />
     <ClCompile Include="src\fitMesh.cpp" />
-    <ClCompile Include="src\kdNNTree.cpp" />
     <ClCompile Include="src\tools.cpp" />
     <ClCompile Include="win-libs.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\fitMesh.h" />
-    <ClInclude Include="include\kdNNTree.h" />
+    <ClInclude Include="include\kdNNTree.hpp" />
     <ClInclude Include="include\miniBLAS.hpp" />
     <ClInclude Include="include\tools.h" />
     <ClInclude Include="main.h" />
