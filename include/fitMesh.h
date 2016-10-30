@@ -11,11 +11,13 @@
 using arColIS = arma::Col<char>;
 
 void printMat(const char *str, arma::mat m);
-void printMatAll(const char * str, arma::mat m);
+void printMatAll(const char *str, arma::mat m);
 
 ALIGN32 struct FastTriangle : public miniBLAS::AlignBase<32>
 {
 	miniBLAS::Vertex p0, axisu, axisv, norm;
+	
+	bool intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const float dist);
 };
 
 struct CBaseModel
@@ -39,7 +41,7 @@ struct CScan : public CBaseModel
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     cv::flann::Index *kdtree;
-	miniBLAS::NNTree nntree;
+	miniBLAS::h3NNTree nntree;
 
 	void prepare();
 };

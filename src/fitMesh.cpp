@@ -24,6 +24,36 @@ using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
 
+bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const float dist)
+{
+	/*
+	** Point(u,v) = (1-u-v)*p0 + u*p1 + v*p2
+	** Ray:Point(t) = o + t*dir
+	** o + t*dir = (1-u-v)*p0 + u*p1 + v*p2
+	*/
+
+	const Vertex tmp1 = direction * axisv;
+	float f = axisu % tmp1;
+	if (abs(f) < 1e-6f)
+		return false;
+	f = 1.0f / f;
+
+	const Vertex t2r = origin - p0;
+	const float u = (t2r % tmp1) * f;
+	if (u < 0.0f || u > 1.0f)
+		return false;
+	const Vertex tmp2 = t2r * axisu;
+	const float v = (direction % tmp2) * f;
+	if (v < 0.0f || u + v < 1.0f)
+		return false;
+	const float t = (axisv % tmp2) * f;
+	if (f < dist)
+		return true;
+	else
+		return false;
+}
+
+
 void CScan::prepare()
 {
 	vPts.resize(nPoints); vNorms.resize(nPoints);
