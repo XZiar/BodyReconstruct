@@ -24,8 +24,10 @@ using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
 
-bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const float dist)
+bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const miniBLAS::VertexI& idx, const float dist) const
 {
+	if (_mm_movemask_epi8(_mm_cmpeq_epi32(idx, pidx)) != 0)//point is one ertex of the triangle
+		return false;
 	/*
 	** Point(u,v) = (1-u-v)*p0 + u*p1 + v*p2
 	** Ray:Point(t) = o + t*dir
@@ -40,14 +42,16 @@ bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Ver
 
 	const Vertex t2r = origin - p0;
 	const float u = (t2r % tmp1) * f;
-	if (u < 0.0f || u > 1.0f)
+	if (u <= 1e-6f || u >= 1.0f - 1e-6f)
 		return false;
 	const Vertex tmp2 = t2r * axisu;
 	const float v = (direction % tmp2) * f;
-	if (v < 0.0f || u + v < 1.0f)
+	if (v <= 1e-6f || u + v >= 1.0f - 1e-6f)
 		return false;
 	const float t = (axisv % tmp2) * f;
-	if (f < dist)
+	//printf("u:%f,v:%f,f:%f,t:%f,obj-dist:%f\n", u, v, f, t, dist);
+	//getchar();
+	if (t < dist)
 		return true;
 	else
 		return false;
@@ -76,18 +80,21 @@ void CTemplate::init(const arma::mat& p, const arma::mat& f)
 
 	faces = f;
 	nFaces = faces.n_rows;
-	faceCache.resize(faces.n_elem);
+	vFaces.resize(nFaces);
 	faceMap.resize(nPoints, UINT32_MAX);
 	const double *px = faces.memptr(), *py = px + nFaces, *pz = py + nFaces;
 	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
 	{
-		auto& tx = faceMap[faceCache[j + 0] = uint16_t(px[i])];
+		auto& objidx = vFaces[i].pidx;
+		objidx.assign(int32_t(px[i]), int32_t(py[i]), int32_t(pz[i]), 65536);
+
+		auto& tx = faceMap[objidx.x];
 		if (tx == UINT32_MAX)
 			tx = i;
-		auto& ty = faceMap[faceCache[j + 1] = uint16_t(py[i])];
+		auto& ty = faceMap[objidx.y];
 		if (ty == UINT32_MAX)
 			ty = i;
-		auto& tz = faceMap[faceCache[j + 2] = uint16_t(pz[i])];
+		auto& tz = faceMap[objidx.z];
 		if (tz == UINT32_MAX)
 			tz = i;
 	}
@@ -114,13 +121,12 @@ void CTemplate::updPoints(miniBLAS::VertexVec&& pts)
 
 void CTemplate::calcFaces()
 {
-	vFaces.resize(nFaces);
 	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
 	{
 		auto& obj = vFaces[i];
-		obj.p0 = vPts[faceCache[j + 0]];
-		obj.axisu = vPts[faceCache[j + 1]] - obj.p0;
-		obj.axisv = vPts[faceCache[j + 2]] - obj.p0;
+		obj.p0 = vPts[obj.pidx.x];
+		obj.axisu = vPts[obj.pidx.y] - obj.p0;
+		obj.axisv = vPts[obj.pidx.z] - obj.p0;
 		obj.norm = (obj.axisu * obj.axisv).norm();
 	}
 }
@@ -1036,10 +1042,28 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &is
 	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
-arColIS fitMesh::nnFilter(const miniBLAS::NNResult& res, const VertexVec& scNorms, const double angLim)
+void fitMesh::raytraceCut(miniBLAS::NNResult& res) const
+{
+	for (uint32_t idx = 0; idx < tempbody.nPoints; ++idx)
+	{
+		const auto& p = tempbody.vPts[idx];
+		const miniBLAS::VertexI vidx(idx, idx, idx, idx);
+		Vertex dir = p - camPos;
+		const float dist = dir.length();
+		dir /= dist;
+		for (const auto& f : tempbody.vFaces)
+		{
+			if (f.intersect(camPos, dir, vidx, dist))//covered
+			{
+				res.idxs[idx] = 65536;
+				break;
+			}
+		}
+	}
+}
+void fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& result, const VertexVec& scNorms, const double angLim)
 {
 	const float mincos = cos(3.1415926 * angLim / 180);
-	arColIS result(tempbody.nPoints, arma::fill::zeros);
 	auto *__restrict pRes = result.memptr();
 	for (uint32_t i = 0; i < tempbody.nPoints; i++)
 	{
@@ -1052,7 +1076,6 @@ arColIS fitMesh::nnFilter(const miniBLAS::NNResult& res, const VertexVec& scNorm
 		if ((scNorms[idx] % tempbody.vNorms[i]) >= mincos)
 			pRes[i] = 1;
 	}
-	return result;
 }
 uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err)
 {
@@ -1081,11 +1104,15 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, cv::Mat &
 	cv::Mat idxsNN(tempbody.nPoints, 1, CV_32S); int *__restrict pidxNN = idxsNN.ptr<int>(0);
 	//dist^2 in fact
 	cv::Mat distNN(tempbody.nPoints, 1, CV_32FC1); float *__restrict pdistNN = distNN.ptr<float>(0);
-	arColIS isValidNN;
+	arColIS isValidNN(tempbody.nPoints, arma::fill::zeros);
 	{
-		t1 = getCurTime();
+		miniBLAS::NNResult nnres(tempbody.nPoints, scan.nntree.PTCount());
+		if(curFrame > 0)
+			raytraceCut(nnres);
 
-		auto nnres = scan.nntree.searchOnAngle(tempbody.vPts, tempbody.vNorms, tempbody.nPoints, angLim*1.1f);
+		t1 = getCurTime();
+		
+		scan.nntree.searchOnAngle(nnres, tempbody.vPts, tempbody.vNorms, angLim*1.1f);
 		//scan.nntree.search(&tempbody.vPts[0], tempbody.nPoints, pidxNN, pdistNN);
 
 		t2 = getCurTime();
@@ -1093,10 +1120,8 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, cv::Mat &
 		logger.log(true, "avxNN uses %lld ms.\n", t2 - t1);
 		memcpy(pidxNN, nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
 		memcpy(pdistNN, nnres.dists, sizeof(float) * tempbody.nPoints);
-		isValidNN = nnFilter(nnres, scan.vNorms, angLim);
+		nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
-	
-	isValidNN = isValidNN % isVisible;
 
 	uint32_t sumVNN = 0;
 	{//caculate total error

@@ -354,7 +354,7 @@ public:
 };
 using VertexVec = std::vector<miniBLAS::Vertex, AlignAllocator<miniBLAS::Vertex>>;
 
-class ALIGN16 VertexI :public Vec4Base<int>
+class ALIGN16 VertexI :public Vec4Base<int32_t>
 {
 public:
 	using Vec4Base::x; using Vec4Base::y; using Vec4Base::z; using Vec4Base::w;
@@ -368,14 +368,23 @@ public:
 	#endif
 	}
 	VertexI(const __m128i &dat) { int_dat = dat; };
-	VertexI(const int x_, const int y_, const int z_, const int w_ = 0) :Vec4Base(x_, y_, z_, w_) { };
-	operator int*() const { return (int *)&x; };
+	VertexI(const int32_t x_, const int32_t y_, const int32_t z_, const int32_t w_ = 0) :Vec4Base(x_, y_, z_, w_) { };
+	operator int32_t*() const { return (int32_t *)&x; };
 	operator const __m128i&() const { return int_dat; };
 	operator Vertex&() const { return *(Vertex*)this; };
 	int& operator[](uint32_t idx)
 	{
 		return data[idx];
 	}
+
+	void assign(const int32_t x_, const int32_t y_, const int32_t z_, const int32_t w_ = 0)
+	{
+		x = x_, y = y_, z = z_, w = w_;
+	};
+	void assign(const int32_t *ptr)
+	{
+		int_dat = _mm_loadu_si128((__m128i*)ptr);
+	};
 };
 
 

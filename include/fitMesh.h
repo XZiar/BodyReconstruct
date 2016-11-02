@@ -13,11 +13,12 @@ using arColIS = arma::Col<char>;
 void printMat(const char *str, arma::mat m);
 void printMatAll(const char *str, arma::mat m);
 
-ALIGN32 struct FastTriangle : public miniBLAS::AlignBase<32>
+ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
 {
 	miniBLAS::Vertex p0, axisu, axisv, norm;
+	miniBLAS::VertexI pidx;
 	
-	bool intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const float dist);
+	bool intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const miniBLAS::VertexI& idx, const float dist) const;
 };
 
 struct CBaseModel
@@ -54,7 +55,6 @@ struct CTemplate : public CBaseModel
     arma::mat landmarksIdx;
 	uint32_t nFaces;
 
-	std::vector<uint16_t> faceCache;
 	std::vector<uint32_t> faceMap;
 	std::vector<FastTriangle, miniBLAS::AlignAllocator<FastTriangle>> vFaces;
 
@@ -159,13 +159,14 @@ private:
 	 ** Fit the model to the scan by pose & shape
 	 **/
 	void fitShapePose(const CScan& scan, const bool solveP = true, const bool solveS = true, const uint32_t iter = 10);
+	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr);
+	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam);
 	/** @brief checkAngle
 	 ** @param angle_thres max angle(in degree) between two norms
 	 **/
 	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
-	arColIS nnFilter(const miniBLAS::NNResult& res, const miniBLAS::VertexVec& scNorms, const double angLim);
-	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr);
-	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam);
+	void nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
+	void raytraceCut(miniBLAS::NNResult& res) const;
 	uint32_t updatePoints(const CScan& scan, const double angLim, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
