@@ -41,7 +41,7 @@ struct CScan : public CBaseModel
     arma::mat landmarks;
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
-    cv::flann::Index *kdtree;
+    //cv::flann::Index *kdtree;
 	miniBLAS::h3NNTree nntree;
 
 	void prepare();
@@ -115,12 +115,11 @@ public:
 	SimpleLog logger;
 
 	bool isFastCost = false;
-	bool isAgLimNN = false;
-	bool useFLANN = false;
+	bool isRayTrace = false;
+	//bool useFLANN = false;
     int angleLimit;
 	double scale;
     arColIS isVisible;
-	cv::Mat idxsNN_;
 	arColIS isValidNN_;
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
@@ -131,7 +130,7 @@ public:
     std::string dataDir;
 public:
 	fitMesh(std::string dir);
-	virtual ~fitMesh();
+	~fitMesh();
 	void loadLandmarks();
 	void init(const std::string& baseName, const bool isOnce);
 	//The main process of the fitting procedue
@@ -140,7 +139,6 @@ private:
 	std::string baseFName;
 	bool mode = true;//true: one scan, false:scan sequence
 	miniBLAS::Vertex camPos;
-	pcl::ModelCoefficients coef;
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
@@ -157,21 +155,25 @@ private:
 	void rigidAlignTemplate2ScanLandmarks();
 	/** @brief fitShapePose
 	 ** Fit the model to the scan by pose & shape
+	 ** @param paramer  a function to determine solve params by iteration
+	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
+	 **					cur_iter, all_iter, angle_limit ==> angle_limit, isSolvePose, isSolveShape
 	 **/
-	void fitShapePose(const CScan& scan, const bool solveP = true, const bool solveS = true, const uint32_t iter = 10);
-	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam &tpParam, const double lastErr);
-	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS &isValidNN, ModelParam &tpParam);
-	/** @brief checkAngle
-	 ** @param angle_thres max angle(in degree) between two norms
-	 **/
-	arColIS checkAngle(const arma::mat& normals_knn, const arma::mat& normals_tmp, const double angle_thres);
+	void fitShapePose(const CScan& scan, const uint32_t iter, 
+		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
+	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
+	
+	/** @brief nnFilter
+	** @param -angLim  max angle(in degree) between two norms
+	**/
 	void nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
-	uint32_t updatePoints(const CScan& scan, const double angLim, cv::Mat &idxsNN_rtn, arColIS &isValidNN_rtn, double &err);
+	uint32_t updatePoints(const CScan& scan, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/
-	void showResult(const CScan& scan, const bool isNN = false);
+	void showResult(const CScan& scan, const bool isNN = false, const std::vector<uint32_t>* const idxs = nullptr);
 };
 
 #endif // FITMESH_H

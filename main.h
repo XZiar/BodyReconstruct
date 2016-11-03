@@ -14,11 +14,11 @@
 #include <chrono>
 #include <atomic>
 #include <thread>
+#include <functional>
 
 #include <armadillo>
-
-#include <opencv2/core/core.hpp>
-#include <opencv2/flann/flann.hpp>
+//#include <opencv2/core/core.hpp>
+//#include <opencv2/flann/flann.hpp>
 #include <pcl/io/ply_io.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>

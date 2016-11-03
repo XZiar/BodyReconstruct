@@ -48,7 +48,6 @@ QMAKE_CXXFLAGS += -mavx
 QMAKE_CXXFLAGS += -g
 
 PKGCONFIG += pcl_io-1.8
-PKGCONFIG += opencv
 PKGCONFIG += pcl_visualization-1.8
 PKGCONFIG += pcl_keypoints-1.8
 PKGCONFIG += lapack
