@@ -113,6 +113,10 @@ public:
 class CMesh
 {
 public:
+	constexpr static uint32_t mJointNumber = POSPARAM_NUM - 6;
+	constexpr static uint32_t MotionMatCnt = mJointNumber + 1;
+	using MotionMat = std::array<miniBLAS::SQMat4x4, MotionMatCnt>;
+
 	CMesh()
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
@@ -149,14 +153,14 @@ public:
 
 	// Performs rigid body motions M of the mesh points in the kinematic chain
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
-	void rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
-	void rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth = false);
+	void rigidMotionSim_AVX(const MotionMat& M, const bool smooth = false);
+	void rigidMotionSim2_AVX(const MotionMat& M, const bool smooth = false);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);
 
 	void angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
-	void angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJAngles, miniBLAS::SQMat4x4(&M)[26]);
+	MotionMat angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles);
 	void invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
 	void twistToMatrix(CVector<float>& aTwist, CVector<CMatrix<float> >& M);
 
@@ -172,8 +176,6 @@ public:
 		mJoint(aJointID).setDirection(dir);
 	};
 
-	// Returns the number of joints
-	int joints() { return mJointNumber; };
 	// Returns a joint
 	CJoint& joint(int aJointID) { return mJoint(aJointID); };
 	// turns whether a point is influenced by a certain joint
@@ -280,7 +282,6 @@ protected:
 	CVector<bool> mCovered;
 	CVector<bool> mExtremity;
 
-	int mJointNumber;
 	int mNumPoints;
 	int mNumPatch;
 	int mNumSmooth; // how many joints can influence any given point

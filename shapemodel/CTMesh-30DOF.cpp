@@ -244,7 +244,7 @@ CMeshMotion& CMeshMotion::operator=(const CMeshMotion& aCopyFrom)
 // operator=
 void CMesh::operator=(const CMesh& aMesh)
 {
-	mJointNumber = aMesh.mJointNumber;
+	//mJointNumber = aMesh.mJointNumber;
 	mNumPoints = aMesh.mNumPoints;
 	mNumPatch = aMesh.mNumPatch;
 	mNumSmooth = aMesh.mNumSmooth;
@@ -287,7 +287,7 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniB
 {
 	using miniBLAS::Vertex;
 	isCopy = true;
-	mJointNumber = from.mJointNumber;
+	//mJointNumber = from.mJointNumber;
 	mNumPoints = from.mNumPoints;
 
 	mBounds = from.mBounds;
@@ -336,7 +336,14 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 
 	aStream >> mNumPoints;
 	aStream >> mNumPatch;
-	aStream >> mJointNumber;
+	int jCount;
+	aStream >> jCount;
+	if (jCount != POSPARAM_NUM - 6)
+	{
+		printf("wrong joints number %d, expect %d!\n", jCount, POSPARAM_NUM - 6);
+		getchar();
+		exit(-1);
+	}
 	if (smooth)
 	{
 		aStream >> mNumSmooth;
@@ -353,11 +360,11 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 
 	//cout << mNumPoints << " " << mNumPatch << " " << mJointNumber << " " << mNumSmooth << endl;
 
-	CVector<bool> BoundJoints(mJointNumber + 1, false);
-	mBoundJoints.setSize(mJointNumber + 1);
+	CVector<bool> BoundJoints(MotionMatCnt, false);
+	mBoundJoints.setSize(MotionMatCnt);
 
 	//mHistory.setSize(5);
-	mJoint.setSize(mJointNumber + 1);
+	mJoint.setSize(MotionMatCnt);
 	// Read mesh components
 	mPoints.resize(mNumPoints);
 	mPatch.resize(mNumPatch);
@@ -413,7 +420,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 
 	// set bounds
 	int count = 0;
-	mJointMap.setSize(mJointNumber + 1);
+	mJointMap.setSize(MotionMatCnt);
 	mJointMap = -1;
 	for (int j = 0; j <= mJointNumber; ++j)
 		if (BoundJoints(j))
@@ -493,7 +500,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		aStream >> mJoint(aJointID).mParent;
 	}
 	// Determine which joint motion is influenced by parent joints
-	mInfluencedBy.setSize(mJointNumber + 1, mJointNumber + 1);
+	mInfluencedBy.setSize(MotionMatCnt, MotionMatCnt);
 	mInfluencedBy = false;
 	for (int j = 0; j <= mJointNumber; j++)
 		for (int i = 0; i <= mJointNumber; i++)
@@ -518,7 +525,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		}
 	}
 
-	mEndJoint.setSize(mJointNumber + 1);
+	mEndJoint.setSize(MotionMatCnt);
 	mEndJoint.fill(true);
 	for (int i = 1; i <= mJointNumber; ++i)
 		mEndJoint[mJoint(i).mParent] = false;
@@ -786,6 +793,10 @@ bool CMesh::adaptOFF(const char* aFilename, float lambda)
 // readOFF
 bool CMesh::readOFF(const char* aFilename)
 {
+	printf("exit for unknown-use\n");
+	getchar();
+	exit(-1);
+
 	cout << "Read OFF... ";
 	std::ifstream aStream(aFilename);
 	if (aStream.is_open())
@@ -843,7 +854,7 @@ bool CMesh::readOFF(const char* aFilename)
 			}
 		}
 
-		mJointNumber = 0;
+		//mJointNumber = 0;
 		cout << "ok" << endl;
 		return true;
 	}
@@ -925,14 +936,14 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 		mCurrentMotion.mPoseParameters += X;
 	}
 }
-void CMesh::rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
+void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 {
 	using miniBLAS::Vertex;
 	// Apply motion to points
 	const SmoothParam *__restrict pSP = thePtSmooth;
 	const uint32_t *__restrict pSC = theSmtCnt;
 	Vertex *__restrict pPt = &vPoints[0];
-	__m128 *pMat = &M[0][0];
+	const __m128 *pMat = &M[0][0];
 	for (int i = mNumPoints; i--; pPt++)
 	{
 		const uint32_t sc = *pSC++;
@@ -1021,14 +1032,14 @@ void CMesh::rigidMotionSim_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
 		pSP += sc;
 	}
 }
-void CMesh::rigidMotionSim2_AVX(miniBLAS::SQMat4x4(&M)[26], const bool smooth)
+void CMesh::rigidMotionSim2_AVX(const MotionMat& M, const bool smooth)
 {
 	using miniBLAS::Vertex;
 	// Apply motion to points
 	const SmoothParam *__restrict pSP = theVPtSmooth;
 	const uint32_t *__restrict pSC = theVSmtCnt;
 	const uint32_t cnt = validPts.size();
-	__m128 *pMat = &M[0][0];
+	const __m128 *pMat = &M[0][0];
 	for (uint32_t i = 0; i < cnt; i++)
 	{
 		const uint32_t sc = pSC[i];
@@ -1197,27 +1208,27 @@ void CMesh::makeSmooth(CMesh* initMesh, bool dual)
 		}
 
 		CVector<float> X(mCurrentMotion.mPoseParameters);
-		CVector<CMatrix<float> >M(joints() + 1);
+		CVector<CMatrix<float> >M(MotionMatCnt);
 
 		M(0) = mCurrentMotion.mRBM;
 
-		for (int i = 1; i <= joints(); i++)
+		for (int i = 1; i <= mJointNumber; i++)
 		{
 			M(i).setSize(4, 4); M(i) = 0;
 			M(i)(0, 0) = 1.0; M(i)(1, 1) = 1.0; M(i)(2, 2) = 1.0; M(i)(3, 3) = 1.0;
 		}
 
-		for (int i = joints(); i > 0; i--)
+		for (int i = mJointNumber; i > 0; i--)
 		{
 			CMatrix<float> Mi(4, 4);
 			joint(i).angleToMatrix(X(5 + i), Mi);
-			for (int j = 1; j <= joints(); j++)
+			for (int j = 1; j <= mJointNumber; j++)
 			{
 				if (influencedBy(j, i)) M(j) = Mi*M(j);
 			}
 		}
 
-		for (int i = 1; i <= joints(); i++)
+		for (int i = 1; i <= mJointNumber; i++)
 		{
 			M(i) = M(0)*M(i);
 		}
@@ -1258,11 +1269,12 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 		M(i) = aRBM*M(i);
 	M(0) = aRBM;
 }
-void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJAngles, miniBLAS::SQMat4x4(&M)[26])
+CMesh::MotionMat CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles)
 {
 	using miniBLAS::Vertex;
 	using miniBLAS::SQMat4x4;
 
+	MotionMat M;
 	for (auto& ele : M)
 		ele = SQMat4x4(true);
 	// Determine motion of parts behind joints
@@ -1272,18 +1284,8 @@ void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJ
 	for (int ii = mJointNumber; ii--;)
 	{
 		uint32_t id = ids[ii];
-		auto Mi = mJoint(id).angleToMatrixEx(aJAngles(id + 5));
-		/*
-		CMatrix<float> oMi(4, 4);
-		mJoint(id).angleToMatrixEx(aJAngles(id + 5), oMi); // i-1
-		printf("joint matrix %d\n", id);
-		for (uint32_t b = 0; b < 4; ++b)
-		{
-			Vertex nM(Mi[b]), oM;
-			oM.assign(oMi.data() + b * 4);
-			printf("new: %e,%e,%e,%e \t\told: %e,%e,%e,%e\n", nM.x, nM.y, nM.z, nM.w, oM.x, oM.y, oM.z, oM.w);
-		}
-		*/
+		auto Mi = mJoint(id).angleToMatrixEx(aJAngles[id + 5]);
+
 		for (int jj = 0; jj < mJointNumber; jj++)
 		{
 			uint32_t jid = ids[jj];
@@ -1291,10 +1293,11 @@ void CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const CVector<float>& aJ
 				M[jid] = Mi * M[jid];
 		}
 	}
-
 	M[0].assign(aRBM.data());
 	for (int i = 1; i <= mJointNumber; i++)
 		M[i] = M[0] * M[i];
+	
+	return M;
 }
 
 void CMesh::invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M)
@@ -1908,7 +1911,7 @@ void CMesh::writeMeshDat(std::string fname)
 {
 	NShow::mLogFile.open(fname.c_str());
 	char buffer[10000];
-	sprintf(buffer, "%d %d %d %d\n", mPoints.size(), mPatch.size(), joints(), mNoOfBodyParts);
+	sprintf(buffer, "%d %d %d %d\n", mPoints.size(), mPatch.size(), mJointNumber, mNoOfBodyParts);
 	NShow::mLogFile << buffer;
 	for (unsigned int i0 = 0; i0 < mNumPoints; i0++)
 	{
@@ -1941,9 +1944,9 @@ void CMesh::getWeightsinBuffer(char *buffer, int ptNo)
 	std::vector< std::pair<double, int> > wts;
 	std::pair<double, int> tmp;
 	string wtStr = "";
-	for (int i1 = joints() - 1; i1 >= 0; i1--)
+	for (int i1 = mJointNumber; i1 > 0;)
 	{
-		if (mBoundJoints(i1 + 1) == true)
+		if (mBoundJoints(i1--) == true)
 			wts.push_back(make_pair(weightMatrix(ptNo, i1), i1));
 	}
 
@@ -2152,7 +2155,7 @@ void CMesh::projectSurface(CMatrix<float>& aImage, CMatrix<float>& P, int xoffse
 
 	CMatrix<float> ImageP = aImage;
 
-	for (int k = 0; k <= (*this).joints(); k++)
+	for (int k = 0; k <= mJointNumber; k++)
 	{
 		ImageP = 0;
 		projectToImageJ(ImageP, P, 1, k, xoffset, yoffset);

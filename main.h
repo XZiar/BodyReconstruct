@@ -8,6 +8,7 @@
 #include <cmath>
 #include <string>
 #include <cstring>
+#include <array>
 #include <vector>
 #include <memory>
 #include <time.h>
@@ -25,9 +26,9 @@
 #include <pcl/visualization/cloud_viewer.h>
 #include <ceres/ceres.h>
 
-static const uint32_t POSPARAM_NUM = 31;
-static const uint32_t SHAPEPARAM_NUM = 20;
-static const uint32_t EVALUATE_POINTS_NUM = 6449;
+constexpr uint32_t POSPARAM_NUM = 31;
+constexpr uint32_t SHAPEPARAM_NUM = 20;
+constexpr uint32_t EVALUATE_POINTS_NUM = 6449;
 
 
 uint64_t getCurTime();

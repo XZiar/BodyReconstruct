@@ -44,8 +44,8 @@ int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsI
 	cout << "3D pose parameters:\n";
 	cout << mParams << endl;
 #endif
-	CVector<CMatrix<float> > M(initMesh.joints() + 1);
-	CVector<float> TW(initMesh.joints() + 6);
+	CVector<CMatrix<float> > M(CMesh::mJointNumber + 1);
+	CVector<float> TW(POSPARAM_NUM);
 	for (int j = 6; j < mParams.size(); ++j)
 	{
 		TW(j) = (float)mParams(j);
@@ -56,7 +56,7 @@ int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsI
 	initMesh.rigidMotion(M, TW, true, true);
 
 	// Fill in resulting joints array
-	const uint32_t nJoints = initMesh.joints();
+	const uint32_t nJoints = CMesh::mJointNumber;
 	for (uint32_t i = 0; i < nJoints; i++)
 	{
 		CJoint& joint = initMesh.joint(i + 1);
@@ -126,17 +126,9 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(mesh.joints() + 6);
-	for (int j = 6; j < mParams.size(); ++j)
-	{
-		TW(j) = (float)mParams(j);
-	}
-
-	SQMat4x4 newM[26];
-	mesh.angleToMatrixEx(mRBM, TW, newM);
-
+	const auto M = mesh.angleToMatrixEx(mRBM, poseParamsIn);
 	// rotate joints
-	mesh.rigidMotionSim_AVX(newM, true);
+	mesh.rigidMotionSim_AVX(M, true);
 
 	return std::move(mesh.vPoints);
 }
@@ -155,15 +147,10 @@ VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__res
 	}
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
-	CVector<float> TW(mesh.joints() + 6);
-	for (int j = 6; j < mParams.size(); ++j)
-	{
-		TW(j) = (float)mParams(j);
-	}
-	SQMat4x4 newM[26];
-	mesh.angleToMatrixEx(mRBM, TW, newM);
+
+	const auto M = mesh.angleToMatrixEx(mRBM, poseParamsIn);
 	// rotate joints
-	mesh.rigidMotionSim2_AVX(newM, true);
+	mesh.rigidMotionSim2_AVX(M, true);
 
 	return std::move(mesh.validPts);
 }
@@ -195,16 +182,9 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(mesh.joints() + 6);
-	for (int j = 6; j < mParams.size(); ++j)
-	{
-		TW(j) = (float)mParams(j);
-	}
-
-	SQMat4x4 newM[26];
-	mesh.angleToMatrixEx(mRBM, TW, newM);
+	const auto M = mesh.angleToMatrixEx(mRBM, poseParamsIn);
 	// rotate joints
-	mesh.rigidMotionSim_AVX(newM, true);
+	mesh.rigidMotionSim_AVX(M, true);
 
 	return std::move(mesh.vPoints);
 }
@@ -236,16 +216,9 @@ VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, cons
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
-	CVector<float> TW(mesh.joints() + 6);
-	for (int j = 6; j < mParams.size(); ++j)
-	{
-		TW(j) = (float)mParams(j);
-	}
-
-	SQMat4x4 newM[26];
-	mesh.angleToMatrixEx(mRBM, TW, newM);
+	const auto M = mesh.angleToMatrixEx(mRBM, poseParamsIn);
 	// rotate joints
-	mesh.rigidMotionSim2_AVX(newM, true);
+	mesh.rigidMotionSim2_AVX(M, true);
 
 	return std::move(mesh.validPts);
 }

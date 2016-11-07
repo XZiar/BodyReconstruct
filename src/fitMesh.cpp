@@ -569,9 +569,7 @@ ctools fitMesh::tools;
 
 fitMesh::fitMesh(std::string dir)
 {
-    params.nPCA = SHAPEPARAM_NUM;
-    params.nPose = POSPARAM_NUM;
-    params.nSamplePoints = 60000;
+    nSamplePoints = 60000;
 	dataDir = dir;
 	loadModel();
 	loadTemplate();
@@ -643,7 +641,7 @@ bool fitMesh::loadScan(CScan& scan)
 	scan.normals_orig = arma::normalise(scan.normals_orig, 2, 1);
 
 	//no faces will be loaded, and the normals are calculated when sampling the scan datas
-	if (scan.nPoints <= params.nSamplePoints)//Not sample the scan points
+	if (scan.nPoints <= nSamplePoints)//Not sample the scan points
 	{
 		scan.sample_point_idxes.clear();
 		scan.points = scan.points_orig;
@@ -651,11 +649,11 @@ bool fitMesh::loadScan(CScan& scan)
 	}
 	else//sample the scan points if necessary;
 	{
-		scan.sample_point_idxes = tools.randperm(scan.nPoints, params.nSamplePoints);
-		scan.nPoints = params.nSamplePoints;
+		scan.sample_point_idxes = tools.randperm(scan.nPoints, nSamplePoints);
+		scan.nPoints = nSamplePoints;
 		scan.points = arma::zeros(scan.nPoints, 3);
 		scan.normals = arma::zeros(scan.nPoints, 3);
-		for (uint32_t i = 0; i < params.nSamplePoints; i++)
+		for (uint32_t i = 0; i < nSamplePoints; i++)
 		{
 			scan.points.row(i) = scan.points_orig.row(scan.sample_point_idxes[i]);
 			scan.normals.row(i) = scan.normals_orig.row(scan.sample_point_idxes[i]);
@@ -704,7 +702,7 @@ void fitMesh::loadModel()
 
     //cout<<"loading eigen values...\n";
 	evalues.load(dataDir + "evalues.mat");
-	evalues = evalues.cols(0, params.nPCA - 1);
+	evalues = evalues.cols(0, SHAPEPARAM_NUM - 1);
 	cout << "eigen values loaded: " << evalues.n_rows << "," << evalues.n_cols << endl;
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
@@ -924,6 +922,11 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 			cout << "fit shape\n";
 			solvedS = true;
 			solveShape(scanCache, isValidNN_, curMParam, err);
+			if (curFrame > 0)
+			{
+				for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
+					curMParam.shape[a] = (curMParam.shape[a] + bakMParam.shape[a]) * 0.5;
+			}
 		}
 		cout << "========================================\n";
 		printArray("pose param", curMParam.pose);
@@ -969,7 +972,7 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	else
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<MovementSofter, ceres::CENTRAL, POSPARAM_NUM, POSPARAM_NUM>
-			(new MovementSofter(modelParams.back(), sqrt(lastErr / POSPARAM_NUM) / 2));
+			(new MovementSofter(modelParams.back(), sqrt(lastErr / POSPARAM_NUM)));
 		problem.AddResidualBlock(soft_function, NULL, pose);
 	}
     Solver::Options options;
@@ -1015,7 +1018,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	if (curFrame > 0)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
-			(new ShapeSofter(modelParams.back(), sqrt(lastErr / SHAPEPARAM_NUM) / 2));
+			(new ShapeSofter(modelParams.back(), sqrt(lastErr / SHAPEPARAM_NUM)));
 		problem.AddResidualBlock(soft_function, NULL, shape);
 	}
 //    ceres::CostFunction* reg_function = new ceres::AutoDiffCostFunction<ShapeRegularizer,SHAPEPARAM_NUM,SHAPEPARAM_NUM>
@@ -1256,6 +1259,7 @@ void fitMesh::mainProcess()
 			return make_tuple(angLim, true, true);
 		});
 		modelParams.push_back(curMParam);
+		bakMParam = curMParam;
 	}
 	if (!isVtune)
 		getchar();
@@ -1270,7 +1274,14 @@ void fitMesh::mainProcess()
 			break;
 		//rigid align the scan
 		DirectRigidAlign(curScan);
-		fitShapePose(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim) 
+		if (curFrame > 3)
+		{
+			const auto& p0 = modelParams[curFrame - 4].pose, &p1 = modelParams[curFrame - 3].pose,
+				&p2 = modelParams[curFrame - 2].pose, &p3 = modelParams[curFrame - 1].pose;
+			for (uint32_t a = 0; a < 3; ++a)
+				curMParam.pose[a] += (p2[a] + p3[a] - p0[a] - p1[a]) / (4 + 1);
+		}
+		fitShapePose(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim)
 		{
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
 			const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
@@ -1281,6 +1292,7 @@ void fitMesh::mainProcess()
 				return make_tuple(angLim, true, false);
 		});
 		modelParams.push_back(curMParam);
+		bakMParam = curMParam;
 	}
 	{
 		FILE *fp = fopen("params.csv", "w");

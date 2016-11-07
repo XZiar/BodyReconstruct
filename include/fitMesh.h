@@ -124,7 +124,8 @@ public:
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 
-    CParams params;
+	uint32_t nSamplePoints;
+    //CParams params;
     arma::mat evectors;//the eigen vetors of the body shape model
     arma::mat evalues;
     std::string dataDir;
@@ -142,7 +143,7 @@ private:
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
-	ModelParam curMParam;
+	ModelParam curMParam, bakMParam;
 
 	void loadTemplate();
 	void loadModel();
@@ -165,8 +166,8 @@ private:
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
 	
 	/** @brief nnFilter
-	** @param -angLim  max angle(in degree) between two norms
-	**/
+	 ** @param -angLim  max angle(in degree) between two norms
+	 **/
 	void nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
 	uint32_t updatePoints(const CScan& scan, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
