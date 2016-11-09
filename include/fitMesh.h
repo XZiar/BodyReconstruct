@@ -75,13 +75,6 @@ struct ModelParam
 	};
 };
 
-struct CParams
-{
-    int nPCA;
-    int nPose;
-    int nSamplePoints;
-};
-
 class SimpleLog
 {
 private:
@@ -125,7 +118,6 @@ public:
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 
 	uint32_t nSamplePoints;
-    //CParams params;
     arma::mat evectors;//the eigen vetors of the body shape model
     arma::mat evalues;
     std::string dataDir;

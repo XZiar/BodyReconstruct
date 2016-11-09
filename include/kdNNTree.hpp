@@ -15,8 +15,10 @@ class NNTreeBase
 protected:
 	VertexVec tree[8];
 	VertexVec ntree[8];
+	VertexVec idtree[8];
 	uint32_t ptCount;
-	const float MAXDist2 = 5e3f;
+	const float MAXDist2 = 2e4f;
+	static const uint32_t minbase = 8;
 	inline int judgeIdx(const Vertex& v) const
 	{
 		return ((const CHILD&)(*this)).judgeIdx(v);
@@ -27,8 +29,8 @@ public:
 	void init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints);
 	void searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const;
 	void search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
-	NNResult searchOnAngle(const VertexVec& pt, const VertexVec& norm, const uint32_t count, const float angle) const;
 	void searchOnAngle(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angle) const;
+	void searchOnAnglePan(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angleLim) const;
 	uint32_t PTCount() const { return ptCount + 7; };
 };
 
@@ -118,15 +120,12 @@ public:
 template<typename CHILD>
 void NNTreeBase<CHILD>::init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints)
 {
-	for (auto& t : tree)
+	for (uint32_t a = 0, s = nPoints / 8; a < 8; ++a)
 	{
-		t.clear();
-		t.reserve(nPoints / 8);
-	}
-	for (auto& t : ntree)
-	{
-		t.clear();
-		t.reserve(nPoints / 8);
+		tree[a].clear();
+		tree[a].reserve(nPoints / 8);
+		ntree[a].clear();
+		ntree[a].reserve(nPoints / 8);
 	}
 
 	for (uint32_t i = 0; i < nPoints; ++i)
@@ -136,20 +135,32 @@ void NNTreeBase<CHILD>::init(const VertexVec& points, const VertexVec& normals, 
 		tree[tid].push_back(v);
 		ntree[tid].push_back(normals[i]);
 	}
-	static const uint32_t minbase = 8;
-	const Vertex empty(1e10f, 1e10f, 1e10f);
-	for (auto& t : tree)
-	{
-		for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
-			t.push_back(empty);
-	}
-	const Vertex emptyN(0, 0, 0);
-	for (auto& t : ntree)
-	{
-		for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
-			t.push_back(emptyN);
-	}
+
 	ptCount = nPoints;
+	static const Vertex empty(1e10f, 1e10f, 1e10f);
+	static const Vertex emptyN(0, 0, 0);
+	for (uint32_t a = 0, s = nPoints / 8; a < 8; ++a)
+	{
+		auto& pts = tree[a];
+		for (uint32_t b = pts.size() % minbase; b != 0 && b < minbase; ++b)
+		{
+			pts.push_back(empty);
+			ntree[a].push_back(emptyN);
+		}
+		const uint32_t idsize = pts.size() / 4;
+		auto& ids = idtree[a];
+		ids.resize(idsize);
+		for (uint32_t b = 0, c = 0; b < idsize; b += 2, c += 8)
+		{
+			//calculate 4 vector represent 8 (point-Obj ---> point-Base)
+			const __m256 vb01 = _mm256_load_ps(pts[c + 0]), vb23 = _mm256_load_ps(pts[c + 2]), 
+				vb45 = _mm256_load_ps(pts[c + 4]), vb67 = _mm256_load_ps(pts[c + 6]);
+			//make up vector contain 8 new idx from point-base's extra idx data
+			const __m256 id8 = _mm256_shuffle_ps(_mm256_unpackhi_ps(vb01, vb23)/*xx,i1,i3;xx,i2,i4*/,
+				_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110)/*i1,i3,i5,i7;i2,i4,i6,i8*/;
+			_mm256_store_ps(ids[b], id8);
+		}
+	}
 }
 
 template<typename CHILD>
@@ -268,36 +279,41 @@ void NNTreeBase<CHILD>::search(const Vertex *pVert, const uint32_t count, int *_
 }
 
 template<typename CHILD>
-NNResult NNTreeBase<CHILD>::searchOnAngle(const VertexVec& pt, const VertexVec& norm, const uint32_t count, const float angle) const
+void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angle) const
 {
-	NNResult ret(count, PTCount());
+	const uint32_t count = ret.objSize;
 	int *idxs = ret.idxs; float *dists = ret.dists;
 	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angle / 180));
 	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
 	for (uint32_t a = count; a--; ++pVert, ++pNorm)
 	{
+		if (*idxs > 65530)//fast skip
+		{
+			*idxs++;
+			*dists++ = 1e10f;
+			continue;
+		}
 		//object vertex being searched
 		const Vertex vObj = *pVert; const __m256 mObj = _mm256_broadcast_ps((__m128*)pVert), mNorm = _mm256_broadcast_ps((__m128*)pNorm);
 		//find proper subtree
 		const auto tid = judgeIdx(vObj);
 		const auto& part = tree[tid];
-		const float *__restrict pBase = part[0], *__restrict pNBase = ntree[tid][0];
+		const float *__restrict pBase = part[0], *__restrict pNBase = ntree[tid][0], *__restrict pID = idtree[tid][0];
 		//min dist * 8   AND   min idx * 8
 		__m256 min8 = _mm256_set1_ps(1e10f), minpos8 = _mm256_setzero_ps();
 
-		for (uint32_t b = part.size() / 8; b--; )
+		for (uint32_t b = part.size() / 8; b--; pID += 8)
 		{
 			//calculate 4 vector represent 8 (point-Obj ---> point-Base)
-			const __m256 vb01 = _mm256_load_ps(pBase + 0), vn01 = _mm256_load_ps(pNBase + 0), a1 = _mm256_sub_ps(mObj, vb01);
-			const __m256 vb23 = _mm256_load_ps(pBase + 8), vn23 = _mm256_load_ps(pNBase + 8), a2 = _mm256_sub_ps(mObj, vb23);
-			const __m256 vb45 = _mm256_load_ps(pBase + 16), vn45 = _mm256_load_ps(pNBase + 16), a3 = _mm256_sub_ps(mObj, vb45);
-			const __m256 vb67 = _mm256_load_ps(pBase + 24), vn67 = _mm256_load_ps(pNBase + 32), a4 = _mm256_sub_ps(mObj, vb67);
+			const __m256 vn01 = _mm256_load_ps(pNBase + 0), a1 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 0));
+			const __m256 vn23 = _mm256_load_ps(pNBase + 8), a2 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 8));
+			const __m256 vn45 = _mm256_load_ps(pNBase + 16), a3 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 16));
+			const __m256 vn67 = _mm256_load_ps(pNBase + 32), a4 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 24));
 
 			//prefetch
 			_mm_prefetch((const char*)(pBase += 32), _MM_HINT_T1);
 			_mm_prefetch((const char*)(pNBase += 32), _MM_HINT_T1);
 
-			//make up vector contain 8 dist data(dist^2)
 			const __m256 cos8 = _mm256_blend_ps
 			(
 				_mm256_blend_ps(_mm256_dp_ps(vn01, mNorm, 0x71)/*c1,000;c2,000*/, _mm256_dp_ps(vn23, mNorm, 0x72)/*0,c3,00;0,c4,00*/,
@@ -307,6 +323,8 @@ NNResult NNTreeBase<CHILD>::searchOnAngle(const VertexVec& pt, const VertexVec& 
 				0b11001100
 			)/*c1,c3,c5,c7;c2,c4,c6,c8*/;
 			const __m256 cosRes = _mm256_cmp_ps(cos8, mincos, _CMP_GE_OS);
+			if (!_mm256_movemask_ps(cosRes))//angle all unsatisfied
+				continue;
 
 			//make up vector contain 8 dist data(dist^2)
 			const __m256 this8 = _mm256_blend_ps
@@ -323,12 +341,8 @@ NNResult NNTreeBase<CHILD>::searchOnAngle(const VertexVec& pt, const VertexVec& 
 			//if it neccessary to update idx
 			if (_mm256_movemask_ps(mask))
 			{
-				//make up vector contain 4 new idx from point-base's extra idx data
-				const __m256 pos8 = _mm256_shuffle_ps(_mm256_unpackhi_ps(vb01, vb23)/*xx,i1,i3;xx,i2,i4*/,
-					_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110)/*i1,i3,i5,i7;i2,i4,i6,i8*/;
-
-				//refresh min idx
-				minpos8 = _mm256_blendv_ps(minpos8, pos8, mask);
+				//load idx data and refresh min idx
+				minpos8 = _mm256_blendv_ps(minpos8, _mm256_load_ps(pID), mask);
 			}
 		}
 		// after uprolled search, need to extract min dist&idx among 8 data
@@ -372,15 +386,14 @@ NNResult NNTreeBase<CHILD>::searchOnAngle(const VertexVec& pt, const VertexVec& 
 				ret.mdists[IDX] = DIST;
 		}
 	}
-	return ret;
 }
 
 template<typename CHILD>
-void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angle) const
+void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angLim) const
 {
 	const uint32_t count = ret.objSize;
 	int *idxs = ret.idxs; float *dists = ret.dists;
-	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angle / 180));
+	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angMax / 180)), limcos = _mm256_set1_ps(cos(3.1415926 * angLim / 180));
 	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
 	for (uint32_t a = count; a--; ++pVert, ++pNorm)
 	{
@@ -395,23 +408,22 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 		//find proper subtree
 		const auto tid = judgeIdx(vObj);
 		const auto& part = tree[tid];
-		const float *__restrict pBase = part[0], *__restrict pNBase = ntree[tid][0];
+		const float *__restrict pBase = part[0], *__restrict pNBase = ntree[tid][0], *__restrict pID = idtree[tid][0];
 		//min dist * 8   AND   min idx * 8
 		__m256 min8 = _mm256_set1_ps(1e10f), minpos8 = _mm256_setzero_ps();
 
-		for (uint32_t b = part.size() / 8; b--; )
+		for (uint32_t b = part.size() / 8; b--; pID += 8)
 		{
 			//calculate 4 vector represent 8 (point-Obj ---> point-Base)
-			const __m256 vb01 = _mm256_load_ps(pBase + 0), vn01 = _mm256_load_ps(pNBase + 0), a1 = _mm256_sub_ps(mObj, vb01);
-			const __m256 vb23 = _mm256_load_ps(pBase + 8), vn23 = _mm256_load_ps(pNBase + 8), a2 = _mm256_sub_ps(mObj, vb23);
-			const __m256 vb45 = _mm256_load_ps(pBase + 16), vn45 = _mm256_load_ps(pNBase + 16), a3 = _mm256_sub_ps(mObj, vb45);
-			const __m256 vb67 = _mm256_load_ps(pBase + 24), vn67 = _mm256_load_ps(pNBase + 32), a4 = _mm256_sub_ps(mObj, vb67);
+			const __m256 vn01 = _mm256_load_ps(pNBase + 0), a1 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 0));
+			const __m256 vn23 = _mm256_load_ps(pNBase + 8), a2 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 8));
+			const __m256 vn45 = _mm256_load_ps(pNBase + 16), a3 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 16));
+			const __m256 vn67 = _mm256_load_ps(pNBase + 32), a4 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 24));
 
 			//prefetch
 			_mm_prefetch((const char*)(pBase += 32), _MM_HINT_T1);
 			_mm_prefetch((const char*)(pNBase += 32), _MM_HINT_T1);
 
-			//make up vector contain 8 dist data(dist^2)
 			const __m256 cos8 = _mm256_blend_ps
 			(
 				_mm256_blend_ps(_mm256_dp_ps(vn01, mNorm, 0x71)/*c1,000;c2,000*/, _mm256_dp_ps(vn23, mNorm, 0x72)/*0,c3,00;0,c4,00*/,
@@ -421,14 +433,20 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 				0b11001100
 			)/*c1,c3,c5,c7;c2,c4,c6,c8*/;
 			const __m256 cosRes = _mm256_cmp_ps(cos8, mincos, _CMP_GE_OS);
+			if (!_mm256_movemask_ps(cosRes))//angle all unsatisfied
+				continue;
+
+			const __m256 panMask = _mm256_and_ps(_mm256_cmp_ps(cos8, limcos, _CMP_LT_OS), cosRes);//those need to be panish
+			const __m256 pan8 = _mm256_div_ps(limcos, cos8);
 
 			//make up vector contain 8 dist data(dist^2)
-			const __m256 this8 = _mm256_blend_ps
+			const __m256 the8 = _mm256_blend_ps
 			(
 				_mm256_blend_ps(_mm256_dp_ps(a1, a1, 0x71)/*d1,000;d2,000*/, _mm256_dp_ps(a2, a2, 0x72)/*0,d3,00;0,d4,00*/, 0x22)/*d1,d3,00;d2,d4,00*/,
 				_mm256_blend_ps(_mm256_dp_ps(a3, a3, 0x74)/*00,d5,0;00,d6,0*/, _mm256_dp_ps(a4, a4, 0x78)/*000,d7;000,d8*/, 0x88)/*00,d5,d7;00,d6,d8*/,
 				0b11001100
 			)/*d1,d3,d5,d7;d2,d4,d6,d8*/;
+			const __m256 this8 = _mm256_blendv_ps(the8, _mm256_mul_ps(the8, pan8), panMask);
 
 			//find out which idx need to be updated(less than current and satisfy angle-requierment)
 			const __m256 mask = _mm256_and_ps(_mm256_cmp_ps(this8, min8, _CMP_LT_OS), cosRes);
@@ -437,12 +455,8 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 			//if it neccessary to update idx
 			if (_mm256_movemask_ps(mask))
 			{
-				//make up vector contain 4 new idx from point-base's extra idx data
-				const __m256 pos8 = _mm256_shuffle_ps(_mm256_unpackhi_ps(vb01, vb23)/*xx,i1,i3;xx,i2,i4*/,
-					_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110)/*i1,i3,i5,i7;i2,i4,i6,i8*/;
-
-				//refresh min idx
-				minpos8 = _mm256_blendv_ps(minpos8, pos8, mask);
+				//load idx data and refresh min idx
+				minpos8 = _mm256_blendv_ps(minpos8, _mm256_load_ps(pID), mask);
 			}
 		}
 		// after uprolled search, need to extract min dist&idx among 8 data
@@ -562,20 +576,32 @@ public:
 				ntree[0].push_back(normals[i]);
 			}
 		}
-		static const uint32_t minbase = 8;
-		const Vertex empty(1e10f, 1e10f, 1e10f);
-		for (auto& t : tree)
-		{
-			for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
-				t.push_back(empty);
-		}
-		const Vertex emptyN(0, 0, 0);
-		for (auto& t : ntree)
-		{
-			for (uint32_t a = t.size() % minbase; a != 0 && a < minbase; ++a)
-				t.push_back(emptyN);
-		}
+		
 		ptCount = nPoints;
+		static const Vertex empty(1e10f, 1e10f, 1e10f);
+		static const Vertex emptyN(0, 0, 0);
+		for (uint32_t a = 0, s = nPoints / 8; a < 3; ++a)
+		{
+			auto& pts = tree[a];
+			for (uint32_t b = pts.size() % minbase; b != 0 && b < minbase; ++b)
+			{
+				pts.push_back(empty);
+				ntree[a].push_back(emptyN);
+			}
+			const uint32_t idsize = pts.size() / 4;
+			auto& ids = idtree[a];
+			ids.resize(idsize);
+			for (uint32_t b = 0, c = 0; b < idsize; b += 2, c += 8)
+			{
+				//calculate 4 vector represent 8 (point-Obj ---> point-Base)
+				const __m256 vb01 = _mm256_load_ps(pts[c + 0]), vb23 = _mm256_load_ps(pts[c + 2]),
+					vb45 = _mm256_load_ps(pts[c + 4]), vb67 = _mm256_load_ps(pts[c + 6]);
+				//make up vector contain 4 new idx from point-base's extra idx data
+				const __m256 id8 = _mm256_shuffle_ps(_mm256_unpackhi_ps(vb01, vb23)/*xx,i1,i3;xx,i2,i4*/,
+					_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110)/*i1,i3,i5,i7;i2,i4,i6,i8*/;
+				_mm256_store_ps(ids[b], id8);
+			}
+		}
 	}
 };
 

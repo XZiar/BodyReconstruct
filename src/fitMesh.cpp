@@ -914,7 +914,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 		if (std::get<1>(param))
 		{
 			cout << "fit pose\n"; 
-			solvedS = true;
+			solvedP = true;
 			solvePose(scanCache, isValidNN_, curMParam, err);
 		}
 		if (std::get<2>(param))
@@ -1114,8 +1114,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, vector<ui
 
 		t1 = getCurTime();
 		
-		scan.nntree.searchOnAngle(nnres, tempbody.vPts, tempbody.vNorms, angLim*1.1f);
-		//scan.nntree.search(&tempbody.vPts[0], tempbody.nPoints, pidxNN, pdistNN);
+		scan.nntree.searchOnAnglePan(nnres, tempbody.vPts, tempbody.vNorms, angLim*1.1f, angleLimit / 2);
 
 		t2 = getCurTime();
 		cMatchNN++; tMatchNN += t2 - t1;
@@ -1256,7 +1255,7 @@ void fitMesh::mainProcess()
 		{
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
 			const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
-			return make_tuple(angLim, true, true);
+			return make_tuple(angLim, true, cur > 0);
 		});
 		modelParams.push_back(curMParam);
 		bakMParam = curMParam;
@@ -1285,7 +1284,7 @@ void fitMesh::mainProcess()
 		{
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
 			const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
-			const uint32_t obj_iter = (iter + 1) / 2;
+			const uint32_t obj_iter = std::min(iter - 1, (iter + 3) / 2);
 			if (cur == obj_iter)
 				return make_tuple(angLim, true, true);
 			else
