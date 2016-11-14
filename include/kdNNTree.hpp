@@ -17,13 +17,13 @@ protected:
 	VertexVec ntree[8];
 	VertexVec idtree[8];
 	uint32_t ptCount;
-	const float MAXDist2 = 2e4f;
 	static const uint32_t minbase = 8;
 	inline int judgeIdx(const Vertex& v) const
 	{
 		return ((const CHILD&)(*this)).judgeIdx(v);
 	};
 public:
+	float MAXDist2 = 3e4f;
 	NNTreeBase() = default;
 	~NNTreeBase() = default;
 	void init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints);

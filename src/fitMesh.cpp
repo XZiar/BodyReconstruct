@@ -219,7 +219,7 @@ static pcl::visualization::CloudViewer viewer("viewer");
 static atomic_uint32_t runcnt(0), runtime(0);
 static uint32_t nncnt = 0, nntime = 0;
 //Definition of optimization functions
-struct PoseCostFunctorEx
+struct PoseCostFunctor
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
@@ -229,7 +229,7 @@ private:
 	const VertexVec basePts;
 
 public:
-	PoseCostFunctorEx(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+	PoseCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
 		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape))
 	{
 	}
@@ -262,7 +262,7 @@ public:
 		return true;
 	}
 };
-struct ShapeCostFunctorEx
+struct ShapeCostFunctor
 {
 private:
 	// this should be the firtst to declare in order to be initialized before other things
@@ -271,7 +271,7 @@ private:
 	const arColIS isValidNN_;
 	const VertexVec& scanCache_;
 public:
-	ShapeCostFunctorEx(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+	ShapeCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
 		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
 	{
 	}
@@ -311,16 +311,24 @@ private:
 	const arColIS isValidNN_;
 	const VertexVec& validScanCache_;
 	const CMesh baseMesh;
-
+	std::vector<float> weights;
 public:
 	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
 		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
 	}
+	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+		const std::vector<float>& wgts)
+		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
+		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
+	{
+		weights = wgts;
+	}
 	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose, double* residual) const
 	{
+		const bool isWgt = (weights.size() > 0);
 		uint64_t t1, t2;
 		t1 = getCurTimeNS();
 
@@ -330,7 +338,7 @@ public:
 		const uint32_t cnt = validScanCache_.size();
 		for (uint32_t i = 0, j = 0; j < cnt; ++j)
 		{
-			const Vertex delta = validScanCache_[j] - pts[j];
+			const Vertex delta = (validScanCache_[j] - pts[j]) * (isWgt ? weights[j] : 1);
 			residual[i + 0] = delta.x;
 			residual[i + 1] = delta.y;
 			residual[i + 2] = delta.z;
@@ -686,8 +694,6 @@ void fitMesh::loadTemplate()
 
 	tempbody.init(pts, faces);
 	tempbody.calcFaces();
-	
-    isVisible = ones<arColIS>(tempbody.nPoints);
 }
 
 /** @brief loadModel
@@ -816,7 +822,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     arma::mat R = (eig_vec * Rsc.i()).t();
 
     double dDepth = 0;
-    R = rigidAlignFix(scpoint, R, dDepth);
+	if(isShFix)
+		R = rigidAlignFix(scpoint, R, dDepth);
 
     //finally rotate scan body
     scpoint *= R;
@@ -954,13 +961,14 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	if (isFastCost)
 	{
 		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
-			(new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
+			(isAngWgt ? new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache, weights) :
+				new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
 	}
 	else
 	{
-		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctorEx, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
-			(new PoseCostFunctorEx(&shapepose, tpParam, isValidNN, scanCache));
+		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
+			(new PoseCostFunctor(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx, NULL, pose);
 	}
 	if (curFrame == 0)
@@ -1011,8 +1019,8 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	}
 	else
 	{
-		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorEx(&shapepose, tpParam, isValidNN, scanCache));
+		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
+			(new ShapeCostFunctor(&shapepose, tpParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEx, NULL, shape);
 	}
 	if (curFrame > 0)
@@ -1064,9 +1072,10 @@ void fitMesh::raytraceCut(miniBLAS::NNResult& res) const
 		}
 	}
 }
-void fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& result, const VertexVec& scNorms, const double angLim)
+std::vector<float> fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& result, const VertexVec& scNorms, const double angLim)
 {
-	const float mincos = cos(3.1415926 * angLim / 180);
+	vector<float> weights;
+	const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
 	auto *__restrict pRes = result.memptr();
 	for (uint32_t i = 0; i < tempbody.nPoints; i++)
 	{
@@ -1076,9 +1085,14 @@ void fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& result, const Ver
 		if (res.mthcnts[idx] > 3)//consider cut some link
 			if (res.mdists[idx] < res.dists[i])//not mininum
 				continue;
-		if ((scNorms[idx] % tempbody.vNorms[i]) >= mincos)//satisfy angle limit
+		const auto thecos = scNorms[idx] % tempbody.vNorms[i];
+		if (thecos >= mincos)//satisfy angle limit
+		{
 			pRes[i] = 1;
+			weights.push_back(thecos > limcos? 1 : thecos * cosInv);
+		}
 	}
+	return weights;
 }
 uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, vector<uint32_t> &idxs, arColIS &isValidNN_rtn, double &err)
 {
@@ -1120,7 +1134,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, vector<ui
 		cMatchNN++; tMatchNN += t2 - t1;
 		logger.log(true, "avxNN uses %lld ms.\n", t2 - t1);
 		memcpy(pidxNN, nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
-		nnFilter(nnres, isValidNN, scan.vNorms, angLim);
+		weights = nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
 
 	uint32_t sumVNN = 0;
@@ -1227,9 +1241,11 @@ void fitMesh::init(const std::string& baseName, const bool isOnce)
 {
 	mode = isOnce;
 	baseFName = baseName;
+	isShFix = yesORno("fix shoulder?");
 	isFastCost = yesORno("use fast cost func?");
 	angleLimit = isVtune ? 30 : inputNumber("angle limit");
-	isRayTrace = yesORno("use ray trace to cut?");
+	//isRayTrace = yesORno("use ray trace to cut?");
+	isAngWgt = yesORno("use weight on angles?");
 }
 void fitMesh::mainProcess()
 {
@@ -1239,7 +1255,7 @@ void fitMesh::mainProcess()
 		CScan& firstScan = scanFrames.back();
 		loadScan(firstScan);
 		rigidAlignTemplate2ScanPCA(firstScan);
-		{
+		{// draw camara
 			pcl::ModelCoefficients coef;
 			coef.values.resize(4);
 			coef.values[0] = camPos.x;
@@ -1273,6 +1289,7 @@ void fitMesh::mainProcess()
 			break;
 		//rigid align the scan
 		DirectRigidAlign(curScan);
+		curScan.nntree.MAXDist2 = 5e3f;
 		if (curFrame > 3)
 		{
 			const auto& p0 = modelParams[curFrame - 4].pose, &p1 = modelParams[curFrame - 3].pose,

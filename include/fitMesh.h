@@ -109,11 +109,13 @@ public:
 
 	bool isFastCost = false;
 	bool isRayTrace = false;
+	bool isAngWgt = false;
+	bool isShFix = true;
 	//bool useFLANN = false;
     int angleLimit;
 	double scale;
-    arColIS isVisible;
 	arColIS isValidNN_;
+	std::vector<float> weights;
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 
@@ -148,7 +150,7 @@ private:
 	void rigidAlignTemplate2ScanLandmarks();
 	/** @brief fitShapePose
 	 ** Fit the model to the scan by pose & shape
-	 ** @param paramer  a function to determine solve params by iteration
+	 ** @param -paramer  a function to determine solve params by iteration
 	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
 	 **					cur_iter, all_iter, angle_limit ==> angle_limit, isSolvePose, isSolveShape
 	 **/
@@ -160,7 +162,7 @@ private:
 	/** @brief nnFilter
 	 ** @param -angLim  max angle(in degree) between two norms
 	 **/
-	void nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
+	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
 	uint32_t updatePoints(const CScan& scan, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult

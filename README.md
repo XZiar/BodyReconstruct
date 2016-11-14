@@ -1,16 +1,16 @@
 # BodyReconstruct
-BodyReconstruct
+3D Body Reconstruct from scan data of RGBD camara
 
 ##Requirement
-eigen
+eigen  
 ceres solver  
-gtk
+gtk  
 pcl  
 armadillo  
-opencv(could be removed)  
+opencv(currently removed)  
 
-cpu support AVX  
-compiler support C++11  
+cpu : support AVX  
+compiler : support C++14  
 x64 only  
 
 ##Structure
@@ -23,4 +23,4 @@ vs2015 peoject for linux
 ###BodyReconstructWin.vcxproj
 vs2015 project for windows
 ###win-libs.cpp
-requierd by windows, coded library dependency
+requierd by windows msvc, coded library dependency
