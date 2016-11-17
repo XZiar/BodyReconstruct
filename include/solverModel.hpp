@@ -152,9 +152,11 @@ private:
 	const double(&poseParam_)[POSPARAM_NUM];
 	const arColIS isValidNN_;
 	const VertexVec& validScanCache_;
+	const PtrModSmooth mSmooth;
 public:
-	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache)
+	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+		PtrModSmooth mSmooth_)
+		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_)
 	{
 	}
 	//w is the parameters to be estimated, b is the bias, residual is to return
@@ -164,7 +166,7 @@ public:
 		t1 = getCurTimeNS();
 
 		const auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelFast2(shape, poseParam_, pValid);
+		const auto pts = shapepose_->getModelFast2(mSmooth, shape, poseParam_, pValid);
 
 		const uint32_t cnt = validScanCache_.size();
 		for (uint32_t i = 0, j = 0; j < cnt; ++j)

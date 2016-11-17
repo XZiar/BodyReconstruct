@@ -674,7 +674,7 @@ void CMesh::prepareData()
 	//thePtSmooth = &ptSmooth[0];
 }
 
-PtrModSmooth CMesh::preCompute(const char *__restrict validMask)
+PtrModSmooth CMesh::preCompute(const char *__restrict validMask) const
 {
 	PtrModSmooth validSmooth = std::make_shared<ModelSmooth>();
 	validSmooth->ptSmooth.clear();
@@ -689,7 +689,7 @@ PtrModSmooth CMesh::preCompute(const char *__restrict validMask)
 		}
 		smtIdx += sc;
 	}
-	validPts.resize(validSmooth->smtCnt.size());
+	//validPts.resize(validSmooth->smtCnt.size());
 	return validSmooth;
 }
 

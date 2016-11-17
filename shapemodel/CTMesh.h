@@ -129,6 +129,8 @@ public:
 	constexpr static uint32_t MotionMatCnt = mJointNumber + 1;
 	using MotionMat = std::array<miniBLAS::SQMat4x4, MotionMatCnt>;
 
+	PtrModSmooth modsmooth;
+
 	CMesh()
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
@@ -141,7 +143,7 @@ public:
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
-	PtrModSmooth preCompute(const char *__restrict validMask);
+	PtrModSmooth preCompute(const char *__restrict validMask) const;
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
@@ -273,22 +275,6 @@ protected:
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
 
-	std::shared_ptr<ModelSmooth> modsmooth;
-
-	/*struct SmoothParam
-	{
-		uint32_t idx;
-		float weight;
-	};*/
-	//std::vector<uint32_t> smtCnt;
-	//const uint32_t *theSmtCnt = nullptr;
-	//std::vector<uint32_t> validSmtCnt;
-	//const uint32_t *theVSmtCnt = nullptr;
-
-	//std::vector<SmoothParam> ptSmooth;
-	//const SmoothParam *thePtSmooth = nullptr;
-	//std::vector<SmoothParam> validPtSmooth;
-	//const SmoothParam *theVPtSmooth = nullptr;
 
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;

@@ -825,7 +825,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	if (isFastCost)
 	{
 		auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
+			(new ShapeCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache, msmooth));
 		problem.AddResidualBlock(cost_functionEx2, NULL, shape);
 	}
 	else

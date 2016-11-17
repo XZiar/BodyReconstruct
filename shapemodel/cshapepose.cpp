@@ -189,10 +189,12 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 
 	return std::move(mesh.vPoints);
 }
-VertexVec CShapePose::getModelFast2(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask) const
+VertexVec CShapePose::getModelFast2(const PtrModSmooth mSmooth, 
+	const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask) const
 {
 	// Read object model
 	CMesh mesh(initMesh_bk, nullptr);
+	mesh.modsmooth = mSmooth;
 
 	Vertex vShape[5];
 	{
