@@ -156,6 +156,7 @@ private:
 	 **/
 	void fitShapePose(const CScan& scan, const uint32_t iter, 
 		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	void fitFinalShape(const uint32_t iter);
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
 	

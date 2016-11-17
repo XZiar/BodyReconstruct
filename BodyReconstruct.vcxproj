@@ -25,6 +25,7 @@
     <ClInclude Include="include\fitMesh.h" />
     <ClInclude Include="include\miniBLAS.hpp" />
     <ClInclude Include="include\kdNNTree.hpp" />
+    <ClInclude Include="include\solverModel.hpp" />
     <ClInclude Include="include\tools.h" />
     <ClInclude Include="main.h" />
     <ClInclude Include="shapemodel\CMatrix.h" />
@@ -34,6 +35,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="BodyReconstruct.pro" />
+    <None Include="README.md" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{61419cec-8dbf-400a-8484-3496b162d8c6}</ProjectGuid>

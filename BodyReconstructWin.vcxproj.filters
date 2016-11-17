@@ -86,6 +86,9 @@
     <ClInclude Include="include\kdNNTree.hpp">
       <Filter>头文件\include</Filter>
     </ClInclude>
+    <ClInclude Include="include\solverModel.hpp">
+      <Filter>头文件\include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />

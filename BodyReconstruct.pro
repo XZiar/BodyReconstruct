@@ -20,6 +20,7 @@ SOURCES += main.cpp \
 HEADERS += main.h \
 	include/miniBLAS.hpp \
 	include/kdNNTree.hpp \
+	include/solverModel.hpp \
     include/tools.h \
     include/fitMesh.h \
     shapemodel/cshapepose.h \

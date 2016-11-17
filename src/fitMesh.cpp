@@ -1,4 +1,5 @@
 #include "fitMesh.h"
+#include "solverModel.hpp"
 
 using std::cin;
 using std::cout;
@@ -13,7 +14,6 @@ using std::shared_ptr;
 using std::unique_ptr;
 using std::make_shared;
 using std::make_tuple;
-using atomic_uint32_t = std::atomic_uint_least32_t;
 
 using arma::zeros;
 using arma::ones;
@@ -208,268 +208,17 @@ static VertexVec shuffleANDfilter(const VertexVec& in, const uint32_t cnt, const
 	else
 	{
 		cache.resize(cnt);
+		const auto maxsize = in.size();
 		for (uint32_t i = 0; i < cnt; ++i)
-			cache[i] = in[idx[i]];
+		{
+			const auto id = idx[i];
+			cache[i] = in[id >= maxsize ? 0 : id];
+		}
 	}
 	return cache;
 }
 
 static pcl::visualization::CloudViewer viewer("viewer");
-
-static atomic_uint32_t runcnt(0), runtime(0);
-static uint32_t nncnt = 0, nntime = 0;
-//Definition of optimization functions
-struct PoseCostFunctor
-{
-private:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const arColIS isValidNN_;
-	const VertexVec& scanCache_;
-	const VertexVec basePts;
-
-public:
-	PoseCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape))
-	{
-	}
-	//pose is the parameters to be estimated, b is the bias, residual is to return
-	bool operator()(const double* pose, double* residual) const
-	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
-
-		const auto pts = shapepose_->getModelByPose(basePts, pose);
-		auto *__restrict pValid = isValidNN_.memptr();
-		uint32_t i = 0;
-		for (int j = 0; j < isValidNN_.n_elem; ++j)
-		{
-			if (pValid[j])
-			{
-				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x;
-				residual[i + 1] = delta.y;
-				residual[i + 2] = delta.z;
-				i += 3;
-			}
-		}
-		//printf("now i=%d, total=%d, demand=%d\n", i, isValidNN_.n_elem * 3, 3 * EVALUATE_POINTS_NUM);
-		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
-
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
-		return true;
-	}
-};
-struct ShapeCostFunctor
-{
-private:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const double (&poseParam_)[POSPARAM_NUM];
-	const arColIS isValidNN_;
-	const VertexVec& scanCache_;
-public:
-	ShapeCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
-	{
-	}
-	//w is the parameters to be estimated, b is the bias, residual is to return
-	bool operator() (const double* shape, double* residual) const
-	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
-
-		const auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelFast(shape, poseParam_);
-		uint32_t i = 0;
-		for (int j = 0; j < isValidNN_.n_elem; ++j)
-		{
-			if (pValid[j])
-			{
-				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x;
-				residual[i + 1] = delta.y;
-				residual[i + 2] = delta.z;
-				i += 3;
-			}
-		}
-		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
-
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
-		return true;
-	}
-};
-struct PoseCostFunctorEx2
-{
-private:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const arColIS isValidNN_;
-	const VertexVec& validScanCache_;
-	const CMesh baseMesh;
-	std::vector<float> weights;
-public:
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
-		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
-	{
-	}
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
-		const std::vector<float>& wgts)
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
-		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
-	{
-		weights = wgts;
-	}
-	//pose is the parameters to be estimated, b is the bias, residual is to return
-	bool operator()(const double* pose, double* residual) const
-	{
-		const bool isWgt = (weights.size() > 0);
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
-
-		auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelByPose2(baseMesh, pose, pValid);
-
-		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
-		{
-			const Vertex delta = (validScanCache_[j] - pts[j]) * (isWgt ? weights[j] : 1);
-			residual[i + 0] = delta.x;
-			residual[i + 1] = delta.y;
-			residual[i + 2] = delta.z;
-			i += 3;
-		}
-		memset(&residual[3 * cnt], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
-		
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
-		return true;
-	}
-};
-struct ShapeCostFunctorEx2
-{
-private:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const double (&poseParam_)[POSPARAM_NUM];
-	const arColIS isValidNN_;
-	const VertexVec& validScanCache_;
-public:
-	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache)
-	{
-	}
-	//w is the parameters to be estimated, b is the bias, residual is to return
-	bool operator() (const double* shape, double* residual) const
-	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
-
-		const auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelFast2(shape, poseParam_, pValid);
-
-		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
-		{
-			const Vertex delta = validScanCache_[j] - pts[j];
-			residual[i + 0] = delta.x;
-			residual[i + 1] = delta.y;
-			residual[i + 2] = delta.z;
-			i += 3;
-		}
-		memset(&residual[3 * cnt], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
-
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
-		return true;
-	}
-};
-
-struct PoseRegularizer
-{
-private:
-	int dim_;
-	double weight_;
-public:
-	PoseRegularizer(double weight, int dim) :weight_(weight), dim_(dim)
-	{
-		//cout<<"the weight:"<<weight_<<endl;
-	}
-	template <typename T>
-	bool operator ()(const T* const w, T* residual) const
-	{
-		//        T sum=T(0);
-		for (int i = 0; i < dim_; i++)
-		{
-			//            sum += T(w[i]);
-			residual[i] = weight_*T(w[i]);
-		}
-		//        residual[0]=weight_*sqrt(sum);
-		return true;
-	}
-};
-
-struct ShapeRegularizer
-{
-private:
-	int dim_;
-	double weight_;
-public:
-	ShapeRegularizer(double weight, int dim) :weight_(weight), dim_(dim)
-	{
-		//cout<<"the weight:"<<weight_<<endl;
-	}
-	template <typename T>
-	bool operator ()(const T* const w, T* residual) const
-	{
-		for (int i = 0; i < dim_; i++)
-		{
-			//            sum += T(w[i]);
-			residual[i] = weight_*T(w[i]);
-		}
-		return true;
-	}
-};
-
-struct MovementSofter
-{
-private:
-	const double(&poseParam)[POSPARAM_NUM];
-	const double weight;
-public:
-	MovementSofter(const ModelParam& modelParam, const double w) :poseParam(modelParam.pose), weight(w) { }
-	bool operator()(const double* pose, double* residual) const
-	{
-		uint32_t i = 0;
-		for (; i < 6; ++i)
-			residual[i] = 0;
-		for (; i < POSPARAM_NUM; ++i)
-			residual[i] = weight * abs(pose[i] - poseParam[i]);
-		return true;
-	}
-};
-struct ShapeSofter
-{
-private:
-	const double(&shapeParam)[SHAPEPARAM_NUM];
-	const double weight;
-public:
-	ShapeSofter(const ModelParam& modelParam, const double w) :shapeParam(modelParam.shape), weight(w) { }
-	bool operator()(const double* shape, double* residual) const
-	{
-		for (uint32_t i = 0; i < SHAPEPARAM_NUM; ++i)
-			residual[i] = weight * abs(shape[i] - shapeParam[i]);
-		return true;
-	}
-};
-//===============================================================
 
 static int inputNumber(const char *str)
 {
@@ -944,10 +693,73 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 	showResult(scan, false);
 	//wait until the window is closed
 	cout << "optimization finished\n";
-	if (solvedS)
-		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	if (solvedP)
+		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	if (solvedS)
 		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+}
+void fitMesh::fitFinalShape(const uint32_t iter)
+{
+	double err = 0;
+	uint32_t sumVNN;
+	tSPose = tSShape = tMatchNN = 0;
+	cSPose = cSShape = cMatchNN = 0;
+
+	bool solvedS = false, solvedP = false;
+	vector<uint32_t> idxMapper(tempbody.nPoints);
+
+	Solver::Options options;
+	options.minimizer_type = ceres::TRUST_REGION;
+	options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+	options.linear_solver_type = ceres::DENSE_QR;
+	options.num_threads = 2;
+	options.num_linear_solver_threads = 2;
+	options.minimizer_progress_to_stdout = true;
+
+	//Optimization Loop
+	for (uint32_t a = 0; a < iter; ++a)
+	{
+		vector<arColIS> NNs;
+		vector<VertexVec> scans;
+		for (uint32_t b = 0; b < modelParams.size(); ++b)
+		{
+			NNs.push_back(arColIS());
+			const auto curScan = scanFrames[b];
+			//prepare nn-data
+			sumVNN = updatePoints(curScan, angleLimit*1.1, idxMapper, NNs.back(), err);
+			scans.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
+		}
+
+		double *shape = curMParam.shape;
+
+		Problem problem;
+		cout << "construct problem: SHAPE\n";
+
+		auto cost_function = new ceres::NumericDiffCostFunction<MultiShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
+			(new MultiShapeCostFunctor(&shapepose, modelParams, NNs, scans));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+
+		Solver::Summary summary;
+		cout << "solving...\n";
+		runcnt.store(0);
+		runtime.store(0);
+		ceres::Solve(options, &problem, &summary);
+
+		cout << summary.BriefReport();
+		tSShape += runtime; cSShape += runcnt;
+		const double rt = runtime; const uint32_t rc = runcnt;
+		logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+
+		cout << "========================================\n";
+		printArray("shape param", curMParam.shape);
+		cout << "----------------------------------------\n";
+	}
+	sumVNN = updatePoints(scanFrames.back(), angleLimit, idxMapper, isValidNN_, err);
+	showResult(scanFrames.back(), false);
+	//wait until the window is closed
+	cout << "optimization finished\n";
+	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
 	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
 
@@ -967,9 +779,9 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	}
 	else
 	{
-		auto *cost_functionEx = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
 			(new PoseCostFunctor(&shapepose, tpParam, isValidNN, scanCache));
-		problem.AddResidualBlock(cost_functionEx, NULL, pose);
+		problem.AddResidualBlock(cost_function, NULL, pose);
 	}
 	if (curFrame == 0)
 	{
@@ -1010,7 +822,6 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
     Problem problem;
 	cout << "construct problem: SHAPE\n";
 
-	shapepose.isFastFitShape = isFastCost;
 	if (isFastCost)
 	{
 		auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
@@ -1019,9 +830,9 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	}
 	else
 	{
-		auto cost_functionEx = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
+		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
 			(new ShapeCostFunctor(&shapepose, tpParam, isValidNN, scanCache));
-		problem.AddResidualBlock(cost_functionEx, NULL, shape);
+		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
 	if (curFrame > 0)
 	{
@@ -1309,6 +1120,12 @@ void fitMesh::mainProcess()
 		});
 		modelParams.push_back(curMParam);
 		bakMParam = curMParam;
+	}
+	if (yesORno("run final optimization on SHAPE?"))
+	{
+		fitFinalShape(6);
+		printf("final optimization finished.\n");
+		getchar();
 	}
 	{
 		FILE *fp = fopen("params.csv", "w");

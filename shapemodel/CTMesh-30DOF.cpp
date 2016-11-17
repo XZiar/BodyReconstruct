@@ -33,7 +33,7 @@ using std::string;
 using std::ifstream;
 using std::make_pair;
 using std::vector;
-
+using miniBLAS::Vertex;
 
 static void showfloat4(const char *name, const __m128 *data)
 {
@@ -100,7 +100,6 @@ void CJoint::angleToMatrix(float aAngle, CMatrix<float>& M)
 }
 void CJoint::angleToMatrixEx(const float aAngle, CMatrix<float>& M)
 {
-	using miniBLAS::Vertex;
 	const __m128 dir = _mm_loadu_ps(mDirection.data()), mmt = _mm_loadu_ps(mMoment.data());
 	const float dirX = mDirection(0), dirY = mDirection(1), dirZ = mDirection(2);
 	__m128
@@ -142,7 +141,6 @@ void CJoint::angleToMatrixEx(const float aAngle, CMatrix<float>& M)
 }
 miniBLAS::SQMat4x4 CJoint::angleToMatrixEx(const float aAngle)
 {
-	using miniBLAS::Vertex;
 	using miniBLAS::SQMat3x3;
 	using miniBLAS::SQMat4x4;
 	const float dirX = mDirection(0), dirY = mDirection(1), dirZ = mDirection(2);
@@ -271,11 +269,11 @@ void CMesh::operator=(const CMesh& aMesh)
 	mCurrentMotion = aMesh.mCurrentMotion;
 
 	weightMatrix = aMesh.weightMatrix;
+	minEleSum = aMesh.minEleSum;
 
 	evecCache = aMesh.evecCache;
 	wgtMat = aMesh.wgtMat;
 	minWgtMat = aMesh.minWgtMat;
-	theMinEleSum = aMesh.theMinEleSum;
 	wMatGap = aMesh.wMatGap;
 	theMinWgtMat = &minWgtMat[0];
 	vPoints = aMesh.vPoints;
@@ -285,7 +283,6 @@ void CMesh::operator=(const CMesh& aMesh)
 
 CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn)
 {
-	using miniBLAS::Vertex;
 	isCopy = true;
 	//mJointNumber = from.mJointNumber;
 	mNumPoints = from.mNumPoints;
@@ -299,11 +296,11 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniB
 	mCovered = from.mCovered;
 	mExtremity = from.mExtremity;
 	mInfluencedBy = from.mInfluencedBy;
+	minEleSum = from.minEleSum;
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
 	wMatGap = from.wMatGap;
-	theMinEleSum = from.theMinEleSum;
 	theMinWgtMat = from.theMinWgtMat;
 	thePtSmooth = from.thePtSmooth;
 	theSmtCnt = from.theSmtCnt;
@@ -314,9 +311,9 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniB
 		vPoints = from.vPoints;
 	else
 		vPoints = *pointsIn;
-	if (vpIn == nullptr)
-		validPts.resize(from.validPts.size());
-	else
+	//if (vpIn == nullptr)
+		//validPts.resize(from.validPts.size());
+	if (vpIn != nullptr)
 		validPts = *vpIn;
 }
 
@@ -584,7 +581,6 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 
 void CMesh::prepareData()
 {
-	using miniBLAS::Vertex;
 	//prepare weightMatrix
 	{
 		wMatGap = ((mNumPoints + 7) / 4) & 0xfffffffe;
@@ -655,7 +651,6 @@ void CMesh::prepareData()
 	}
 	theSmtCnt = &smtCnt[0];
 	thePtSmooth = &ptSmooth[0];
-	theMinEleSum = &minEleSum[0];
 }
 
 void CMesh::preCompute(const char *__restrict validMask)
@@ -938,7 +933,7 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 }
 void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 {
-	using miniBLAS::Vertex;
+	CheckCut(false);
 	// Apply motion to points
 	const SmoothParam *__restrict pSP = thePtSmooth;
 	const uint32_t *__restrict pSC = theSmtCnt;
@@ -1034,7 +1029,7 @@ void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 }
 void CMesh::rigidMotionSim2_AVX(const MotionMat& M, const bool smooth)
 {
-	using miniBLAS::Vertex;
+	CheckCut(true);
 	// Apply motion to points
 	const SmoothParam *__restrict pSP = theVPtSmooth;
 	const uint32_t *__restrict pSC = theVSmtCnt;
@@ -1271,7 +1266,6 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 }
 CMesh::MotionMat CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles)
 {
-	using miniBLAS::Vertex;
 	using miniBLAS::SQMat4x4;
 
 	MotionMat M;
@@ -1370,7 +1364,6 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 
 void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 {
-	using miniBLAS::Vertex;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
@@ -1411,7 +1404,7 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 
 void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
-	using miniBLAS::Vertex;
+	CheckCut(false);
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
@@ -1457,14 +1450,13 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 }
 void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const char *__restrict validMask)
 {
-	using miniBLAS::Vertex;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
 	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
 	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
 	const Vertex *__restrict pEvec = &(*evecCache)[0];
-	for (uint32_t row = 0, vldIdx = 0; row < mNumPoints; row++, pEvec += 16)
+	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
 	{
 		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
 		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
@@ -1501,7 +1493,7 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 		vPoints[row].assign(newval);
 
 		if (validMask[row] != 0)
-			validPts[vldIdx++].assign(newval);
+			validPts.push_back(newval);
 	}
 }
 
@@ -1640,7 +1632,6 @@ int CMesh::updateJntPos()
 
 void CMesh::updateJntPosEx()
 {
-	using miniBLAS::Vertex;
 	static const uint8_t idxmap[][2] = //i0,i1*3
 	{ { 2,0 },{ 3,6 },{ 4,9 },{ 6,0 },{ 7,18 },{ 8,21 },{ 10,0 },{ 11,30 }, { 14,30 },{ 15,42 },{ 16,45 },{ 19,30 },{ 20,57 },{ 21,60 } };
 
@@ -1672,7 +1663,7 @@ void CMesh::updateJntPosEx()
 		}
 		sumPosA = _mm256_add_ps(sumPosA, sumPosB);
 		sumPosA = _mm256_add_ps(sumPosA, _mm256_permute2f128_ps(sumPosA, sumPosA, 0b00000001));
-		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), theMinEleSum[mIdx++]));
+		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), minEleSum[mIdx++]));
 		joints0.putToY3(puter, item[0], item[1]);
 	}
 

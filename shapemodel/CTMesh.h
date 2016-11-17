@@ -246,6 +246,16 @@ protected:
 			exit(-1);
 		}
 	}
+	void CheckCut(const bool allow)
+	{
+		const bool isCut = (validPts.size() > 0);
+		if (isCut != allow)
+		{
+			printf("func called only allowed in %s!\n", allow ? "cut" : "non-cut");
+			getchar();
+			exit(-1);
+		}
+	}
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
 
@@ -268,8 +278,7 @@ protected:
 	uint32_t wMatGap;
 	miniBLAS::VertexVec minWgtMat;
 	const miniBLAS::Vertex *theMinWgtMat = nullptr;
-	miniBLAS::Vertex minEleSum[14];
-	const miniBLAS::Vertex *theMinEleSum = nullptr;
+	std::array<miniBLAS::Vertex, 14> minEleSum;
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;

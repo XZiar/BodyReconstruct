@@ -68,6 +68,9 @@
     <ClInclude Include="include\kdNNTree.hpp">
       <Filter>header files\include</Filter>
     </ClInclude>
+    <ClInclude Include="include\solverModel.hpp">
+      <Filter>header files\include</Filter>
+    </ClInclude>
     <ClInclude Include="shapemodel\CMatrix.h">
       <Filter>header files\shapemodel</Filter>
     </ClInclude>

@@ -26,6 +26,8 @@
 #include <pcl/visualization/cloud_viewer.h>
 #include <ceres/ceres.h>
 
+using atomic_uint32_t = std::atomic_uint_least32_t;
+
 constexpr uint32_t POSPARAM_NUM = 31;
 constexpr uint32_t SHAPEPARAM_NUM = 20;
 constexpr uint32_t EVALUATE_POINTS_NUM = 6449;
