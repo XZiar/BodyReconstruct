@@ -110,6 +110,18 @@ public:
 /* }; */
 
 
+struct ModelSmooth
+{
+	struct SmoothParam
+	{
+		uint32_t idx;
+		float weight;
+	};
+	std::vector<uint32_t> smtCnt;
+	std::vector<SmoothParam> ptSmooth;
+};
+using PtrModSmooth = std::shared_ptr<ModelSmooth>;
+
 class CMesh
 {
 public:
@@ -120,14 +132,16 @@ public:
 	CMesh()
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
+		modsmooth.reset(new ModelSmooth());
 	}
 	CMesh(const CMesh& aMesh) { *this = aMesh; };
-	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn = nullptr);
+	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
+	CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmooth);
 	~CMesh() = default;
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
-	void preCompute(const char *__restrict validMask);
+	PtrModSmooth preCompute(const char *__restrict validMask);
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
@@ -259,20 +273,22 @@ protected:
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
 
-	struct SmoothParam
+	std::shared_ptr<ModelSmooth> modsmooth;
+
+	/*struct SmoothParam
 	{
 		uint32_t idx;
 		float weight;
-	};
-	std::vector<uint32_t> smtCnt;
-	const uint32_t *theSmtCnt = nullptr;
-	std::vector<uint32_t> validSmtCnt;
-	const uint32_t *theVSmtCnt = nullptr;
+	};*/
+	//std::vector<uint32_t> smtCnt;
+	//const uint32_t *theSmtCnt = nullptr;
+	//std::vector<uint32_t> validSmtCnt;
+	//const uint32_t *theVSmtCnt = nullptr;
 
-	std::vector<SmoothParam> ptSmooth;
-	const SmoothParam *thePtSmooth = nullptr;
-	std::vector<SmoothParam> validPtSmooth;
-	const SmoothParam *theVPtSmooth = nullptr;
+	//std::vector<SmoothParam> ptSmooth;
+	//const SmoothParam *thePtSmooth = nullptr;
+	//std::vector<SmoothParam> validPtSmooth;
+	//const SmoothParam *theVPtSmooth = nullptr;
 
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;

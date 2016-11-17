@@ -138,6 +138,7 @@ private:
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
 	ModelParam curMParam, bakMParam;
+	PtrModSmooth msmooth;
 
 	void loadTemplate();
 	void loadModel();

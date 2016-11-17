@@ -101,16 +101,18 @@ private:
 	const arColIS isValidNN_;
 	const VertexVec& validScanCache_;
 	const CMesh baseMesh;
+	const PtrModSmooth mSmooth;
 	std::vector<float> weights;
 public:
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache)
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
+	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+		PtrModSmooth mSmooth_)
+		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
 	}
 	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
-		const std::vector<float>& wgts)
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache),
+		PtrModSmooth mSmooth_, const std::vector<float>& wgts)
+		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
 		weights = wgts;
@@ -123,7 +125,7 @@ public:
 		t1 = getCurTimeNS();
 
 		auto *__restrict pValid = isValidNN_.memptr();
-		const auto pts = shapepose_->getModelByPose2(baseMesh, pose, pValid);
+		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, pValid);
 
 		const uint32_t cnt = validScanCache_.size();
 		for (uint32_t i = 0, j = 0; j < cnt; ++j)

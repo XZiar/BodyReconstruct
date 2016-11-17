@@ -666,7 +666,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 
 		const auto scanCache = shuffleANDfilter(scan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.memptr() : nullptr);
 		if (isFastCost)
-			shapepose.preCompute(isValidNN_.memptr());
+			msmooth = shapepose.preCompute(isValidNN_.memptr());
 		if (std::get<1>(param))
 		{
 			cout << "fit pose\n"; 
@@ -773,8 +773,8 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	if (isFastCost)
 	{
 		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
-			(isAngWgt ? new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache, weights) :
-				new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache));
+			(isAngWgt ? new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache, msmooth, weights) :
+				new PoseCostFunctorEx2(&shapepose, tpParam, isValidNN, scanCache, msmooth));
 		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
 	}
 	else

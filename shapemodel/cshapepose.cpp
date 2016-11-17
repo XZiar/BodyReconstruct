@@ -132,10 +132,11 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 
 	return std::move(mesh.vPoints);
 }
-VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn, const char *__restrict validMask) const
+VertexVec CShapePose::getModelByPose2(const PtrModSmooth mSmooth, const CMesh& baseMesh,
+	const double *__restrict poseParamsIn, const char *__restrict validMask) const
 {
 	// Read object model
-	CMesh mesh(initMesh_bk, &baseMesh.vPoints, &baseMesh.validPts);
+	CMesh mesh(initMesh_bk, baseMesh, mSmooth);
 	// update joints
 	mesh.updateJntPosEx();
 

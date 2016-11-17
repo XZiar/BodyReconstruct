@@ -269,6 +269,7 @@ void CMesh::operator=(const CMesh& aMesh)
 	mCurrentMotion = aMesh.mCurrentMotion;
 
 	weightMatrix = aMesh.weightMatrix;
+	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
 	minEleSum = aMesh.minEleSum;
 
 	evecCache = aMesh.evecCache;
@@ -277,11 +278,11 @@ void CMesh::operator=(const CMesh& aMesh)
 	wMatGap = aMesh.wMatGap;
 	theMinWgtMat = &minWgtMat[0];
 	vPoints = aMesh.vPoints;
-	ptSmooth = aMesh.ptSmooth;
-	thePtSmooth = &ptSmooth[0];
+	//ptSmooth = aMesh.ptSmooth;
+	//thePtSmooth = &ptSmooth[0];
 }
 
-CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniBLAS::VertexVec *vpIn)
+CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 {
 	isCopy = true;
 	//mJointNumber = from.mJointNumber;
@@ -302,19 +303,39 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn, const miniB
 	evecCache = from.evecCache;
 	wMatGap = from.wMatGap;
 	theMinWgtMat = from.theMinWgtMat;
-	thePtSmooth = from.thePtSmooth;
-	theSmtCnt = from.theSmtCnt;
-	theVPtSmooth = &from.validPtSmooth[0];
-	theVSmtCnt = &from.validSmtCnt[0];
+	modsmooth = from.modsmooth;
 
 	if (pointsIn == nullptr)
 		vPoints = from.vPoints;
 	else
 		vPoints = *pointsIn;
-	//if (vpIn == nullptr)
-		//validPts.resize(from.validPts.size());
-	if (vpIn != nullptr)
-		validPts = *vpIn;
+}
+
+CMesh::CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmooth)
+{
+	isCopy = true;
+	//mJointNumber = from.mJointNumber;
+	mNumPoints = from.mNumPoints;
+
+	mBounds = from.mBounds;
+	mCenter = from.mCenter;
+	mJoint = from.mJoint;
+	mJointMap = from.mJointMap;
+	mNeighbor = from.mNeighbor;
+	mEndJoint = from.mEndJoint;
+	mCovered = from.mCovered;
+	mExtremity = from.mExtremity;
+	mInfluencedBy = from.mInfluencedBy;
+	minEleSum = from.minEleSum;
+
+	//avoid overhead of copying data unecessarily
+	evecCache = from.evecCache;
+	wMatGap = from.wMatGap;
+	theMinWgtMat = from.theMinWgtMat;
+
+	modsmooth = msmooth;
+	vPoints = baseMesh.vPoints;
+	validPts = baseMesh.validPts;
 }
 
 // readModel
@@ -624,8 +645,8 @@ void CMesh::prepareData()
 	//prepare vPoints & smooth
 	vPoints.resize(mNumPoints + 7);//at lest multiply of 8
 	memset(&vPoints[mNumPoints], 0x0, 7 * sizeof(Vertex));
-	ptSmooth.clear();
-	smtCnt.resize(mNumPoints);
+	modsmooth->ptSmooth.clear();
+	modsmooth->smtCnt.resize(mNumPoints);
 	for (uint32_t a = 0; a < mNumPoints; ++a)
 	{
 		uint8_t scnt = 0;
@@ -638,36 +659,38 @@ void CMesh::prepareData()
 			if (weight > 10e-6)//take it
 			{
 				scnt++;
-				ptSmooth.push_back({ 4 * uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
+				modsmooth->ptSmooth.push_back({ 4 * uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
 			}
 		}
 		if (scnt == 0)
 		{
-			smtCnt[a] = 1;
-			ptSmooth.push_back({ 4, 0 });// this 0 weight will be ignore and considered weight 1 though
+			modsmooth->smtCnt[a] = 1;
+			modsmooth->ptSmooth.push_back({ 4, 0 });// this 0 weight will be ignore and considered weight 1 though
 		}
 		else
-			smtCnt[a] = scnt;
+			modsmooth->smtCnt[a] = scnt;
 	}
-	theSmtCnt = &smtCnt[0];
-	thePtSmooth = &ptSmooth[0];
+	//theSmtCnt = &smtCnt[0];
+	//thePtSmooth = &ptSmooth[0];
 }
 
-void CMesh::preCompute(const char *__restrict validMask)
+PtrModSmooth CMesh::preCompute(const char *__restrict validMask)
 {
-	validPtSmooth.clear();
-	validSmtCnt.clear();
+	PtrModSmooth validSmooth = std::make_shared<ModelSmooth>();
+	validSmooth->ptSmooth.clear();
+	validSmooth->smtCnt.clear();
 	for (uint32_t row = 0, smtIdx = 0; row < mNumPoints; ++row)
 	{
-		const uint32_t sc = theSmtCnt[row];
+		const uint32_t sc = modsmooth->smtCnt[row];
 		if (validMask[row] != 0)
 		{
-			validSmtCnt.push_back(sc);
-			validPtSmooth.insert(validPtSmooth.end(), &thePtSmooth[smtIdx], &thePtSmooth[smtIdx + sc]);
+			validSmooth->smtCnt.push_back(sc);
+			validSmooth->ptSmooth.insert(validSmooth->ptSmooth.end(), &modsmooth->ptSmooth[smtIdx], &modsmooth->ptSmooth[smtIdx + sc]);
 		}
 		smtIdx += sc;
 	}
-	validPts.resize(validSmtCnt.size());
+	validPts.resize(validSmooth->smtCnt.size());
+	return validSmooth;
 }
 
 void CMesh::centerModel()
@@ -935,8 +958,8 @@ void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 {
 	CheckCut(false);
 	// Apply motion to points
-	const SmoothParam *__restrict pSP = thePtSmooth;
-	const uint32_t *__restrict pSC = theSmtCnt;
+	const ModelSmooth::SmoothParam *__restrict pSP = &(modsmooth->ptSmooth[0]);
+	const uint32_t *__restrict pSC = &(modsmooth->smtCnt[0]);
 	Vertex *__restrict pPt = &vPoints[0];
 	const __m128 *pMat = &M[0][0];
 	for (int i = mNumPoints; i--; pPt++)
@@ -1031,8 +1054,8 @@ void CMesh::rigidMotionSim2_AVX(const MotionMat& M, const bool smooth)
 {
 	CheckCut(true);
 	// Apply motion to points
-	const SmoothParam *__restrict pSP = theVPtSmooth;
-	const uint32_t *__restrict pSC = theVSmtCnt;
+	const ModelSmooth::SmoothParam *__restrict pSP = &(modsmooth->ptSmooth[0]);
+	const uint32_t *__restrict pSC = &(modsmooth->smtCnt[0]);
 	const uint32_t cnt = validPts.size();
 	const __m128 *pMat = &M[0][0];
 	for (uint32_t i = 0; i < cnt; i++)
