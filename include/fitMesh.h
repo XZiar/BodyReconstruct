@@ -73,6 +73,14 @@ struct ModelParam
 	{ 
 		memset(pose, 0, sizeof(double)*(POSPARAM_NUM + SHAPEPARAM_NUM));
 	};
+	void setPose(const double(&pose_)[POSPARAM_NUM])
+	{
+		memmove(pose, pose_, sizeof(double)*POSPARAM_NUM);
+	};
+	void setShape(const double(&shape_)[SHAPEPARAM_NUM])
+	{
+		memmove(shape, shape_, sizeof(double)*SHAPEPARAM_NUM);
+	};
 };
 
 class SimpleLog
@@ -166,11 +174,13 @@ private:
 	 **/
 	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
-	uint32_t updatePoints(const CScan& scan, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
+	uint32_t updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/
 	void showResult(const CScan& scan, const bool isNN = false, const std::vector<uint32_t>* const idxs = nullptr);
+
+	void printMParam(const std::string& fname);
 };
 
 #endif // FITMESH_H

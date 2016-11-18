@@ -661,7 +661,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 	for (uint32_t a = 0; a < iter; ++a)
 	{
 		const auto param = paramer(a, iter, angleLimit);
-		sumVNN = updatePoints(scan, std::get<0>(param), idxMapper, isValidNN_, err);
+		sumVNN = updatePoints(scan, curMParam, std::get<0>(param), idxMapper, isValidNN_, err);
 		showResult(scan, false);
 
 		const auto scanCache = shuffleANDfilter(scan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.memptr() : nullptr);
@@ -689,7 +689,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 		printArray("shape param", curMParam.shape);
 		cout << "----------------------------------------\n";
 	}
-	sumVNN = updatePoints(scan, angleLimit, idxMapper, isValidNN_, err);
+	sumVNN = updatePoints(scan, curMParam, angleLimit, idxMapper, isValidNN_, err);
 	showResult(scan, false);
 	//wait until the window is closed
 	cout << "optimization finished\n";
@@ -720,30 +720,32 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 	//Optimization Loop
 	for (uint32_t a = 0; a < iter; ++a)
 	{
-		vector<arColIS> NNs;
-		vector<VertexVec> scans;
-		for (uint32_t b = 0; b < modelParams.size(); ++b)
-		{
-			NNs.push_back(arColIS());
-			const auto curScan = scanFrames[b];
-			//prepare nn-data
-			sumVNN = updatePoints(curScan, angleLimit*1.1, idxMapper, NNs.back(), err);
-			scans.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
-		}
-
 		double *shape = curMParam.shape;
-
 		Problem problem;
 		cout << "construct problem: SHAPE\n";
 
-		auto cost_function = new ceres::NumericDiffCostFunction<MultiShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-			(new MultiShapeCostFunctor(&shapepose, modelParams, NNs, scans));
-		problem.AddResidualBlock(cost_function, NULL, shape);
+		vector<arColIS> NNs;
+		vector<VertexVec> scans;
+		scans.reserve(modelParams.size());
+		for (uint32_t b = 0; b < modelParams.size(); ++b)
+		{
+			const auto curScan = scanFrames[b];
+			auto mPar = modelParams[b];
+			mPar.setShape(curMParam.shape);
+			//prepare nn-data
+			arColIS validNN;
+			sumVNN = updatePoints(curScan, mPar, angleLimit*1.1, idxMapper, validNN, err);
+			showResult(curScan, false);
+			scans.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
+
+			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
+				(new ShapeCostFunctor(&shapepose, modelParams[b], validNN, scans.back()));
+			problem.AddResidualBlock(cost_function, NULL, shape);
+		}
 
 		Solver::Summary summary;
 		cout << "solving...\n";
-		runcnt.store(0);
-		runtime.store(0);
+		runcnt.store(0); runtime.store(0);
 		ceres::Solve(options, &problem, &summary);
 
 		cout << summary.BriefReport();
@@ -755,7 +757,7 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 		printArray("shape param", curMParam.shape);
 		cout << "----------------------------------------\n";
 	}
-	sumVNN = updatePoints(scanFrames.back(), angleLimit, idxMapper, isValidNN_, err);
+	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
 	showResult(scanFrames.back(), false);
 	//wait until the window is closed
 	cout << "optimization finished\n";
@@ -905,9 +907,9 @@ std::vector<float> fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& res
 	}
 	return weights;
 }
-uint32_t fitMesh::updatePoints(const CScan& scan, const double angLim, vector<uint32_t> &idxs, arColIS &isValidNN_rtn, double &err)
+uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, vector<uint32_t> &idxs, arColIS &isValidNN_rtn, double &err)
 {
-	tempbody.updPoints(shapepose.getModelFast(curMParam.shape, curMParam.pose));
+	tempbody.updPoints(shapepose.getModelFast(mPar.shape, mPar.pose));
 	tempbody.calcFaces();
 	tempbody.calcNormals();
 
@@ -1125,38 +1127,51 @@ void fitMesh::mainProcess()
 	{
 		fitFinalShape(6);
 		printf("final optimization finished.\n");
+		modelParams.push_back(curMParam);
 		getchar();
 	}
-	{
-		FILE *fp = fopen("params.csv", "w");
-		fprintf(fp, "MODEL_PARAMS,%d frames,\n,\n", modelParams.size());
-
-		fprintf(fp, "POSE_PARAM,\n,");
-		for (uint32_t a = 0; a < POSPARAM_NUM;)
-			fprintf(fp, "p%d,", a++);
-		fprintf(fp, "\n");
-		uint32_t idx = 0;
-		for (const auto& par : modelParams)
-		{
-			fprintf(fp, "f%d,", idx++);
-			for (uint32_t a = 0; a < POSPARAM_NUM; ++a)
-				fprintf(fp, "%f,", par.pose[a]);
-			fprintf(fp, "\n");
-		}
-
-		fprintf(fp, ",\nSHAPE_PARAM,\n,");
-		for (uint32_t a = 0; a < SHAPEPARAM_NUM;)
-			fprintf(fp, "p%d,", a++);
-		fprintf(fp, "\n");
-		idx = 0;
-		for (const auto& par : modelParams)
-		{
-			fprintf(fp, "f%d,", idx++);
-			for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
-				fprintf(fp, "%f,", par.shape[a]);
-			fprintf(fp, "\n");
-		}
-		fclose(fp);
-	}
+	printMParam("params.csv");
 	getchar();
+}
+
+void fitMesh::printMParam(const std::string& fname)
+{
+	printf("writing final csv...");
+	FILE *fp = fopen(fname.c_str(), "w");
+	if (fp == nullptr)
+	{
+		printf("fail\n");
+		return;
+	}
+
+	fprintf(fp, "MODEL_PARAMS,%d frames,\n,\n", modelParams.size());
+
+	fprintf(fp, "POSE_PARAM,\n,");
+	for (uint32_t a = 0; a < POSPARAM_NUM;)
+		fprintf(fp, "p%d,", a++);
+	fprintf(fp, "\n");
+	uint32_t idx = 0;
+	for (const auto& par : modelParams)
+	{
+		fprintf(fp, "f%d,", idx++);
+		for (uint32_t a = 0; a < POSPARAM_NUM; ++a)
+			fprintf(fp, "%f,", par.pose[a]);
+		fprintf(fp, "\n");
+	}
+
+	fprintf(fp, ",\nSHAPE_PARAM,\n,");
+	for (uint32_t a = 0; a < SHAPEPARAM_NUM;)
+		fprintf(fp, "p%d,", a++);
+	fprintf(fp, "\n");
+	idx = 0;
+	for (const auto& par : modelParams)
+	{
+		fprintf(fp, "f%d,", idx++);
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
+			fprintf(fp, "%f,", par.shape[a]);
+		fprintf(fp, "\n");
+	}
+
+	fclose(fp);
+	printf("done\n");
 }
