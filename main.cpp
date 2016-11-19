@@ -53,8 +53,12 @@ int main(int argc, char *argv[])
 		}
 	}
     meshFittor.mainProcess();
-	printf("Finished!\n");
-	if(!isVtune)
-		getchar();
+	if (!isVtune)
+	{
+		if (yesORno("load previous param to watch?"))
+			meshFittor.watch("params_n_f70");
+		else
+			meshFittor.watch();
+	}
     return 0;
 }

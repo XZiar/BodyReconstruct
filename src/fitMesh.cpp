@@ -662,7 +662,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 	{
 		const auto param = paramer(a, iter, angleLimit);
 		sumVNN = updatePoints(scan, curMParam, std::get<0>(param), idxMapper, isValidNN_, err);
-		showResult(scan, false);
+		showResult(scan);
 
 		const auto scanCache = shuffleANDfilter(scan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.memptr() : nullptr);
 		if (isFastCost)
@@ -690,7 +690,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 		cout << "----------------------------------------\n";
 	}
 	sumVNN = updatePoints(scan, curMParam, angleLimit, idxMapper, isValidNN_, err);
-	showResult(scan, false);
+	showResult(scan);
 	//wait until the window is closed
 	cout << "optimization finished\n";
 	if (solvedP)
@@ -735,7 +735,7 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 			//prepare nn-data
 			arColIS validNN;
 			sumVNN = updatePoints(curScan, mPar, angleLimit*1.1, idxMapper, validNN, err);
-			showResult(curScan, false);
+			showResult(curScan);
 			scans.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
 
 			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
@@ -758,7 +758,7 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 		cout << "----------------------------------------\n";
 	}
 	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
-	showResult(scanFrames.back(), false);
+	showResult(scanFrames.back());
 	//wait until the window is closed
 	cout << "optimization finished\n";
 	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
@@ -1019,12 +1019,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 	isValidNN_rtn = isValidNN;
 	return sumVNN;
 }
-void fitMesh::showResult(const CScan& scan, const bool isNN, const vector<uint32_t>* const idxs)
+void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<uint32_t>* const idxs)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-	//show scan points
-	showPoints(cloud, scan.vPts, scan.vNorms, pcl::PointXYZRGB(192, 0, 0));
-    if(isNN)
+	if (idxs != nullptr)
     {
 		const auto colors_rd = arma::randi<arma::Mat<uint8_t>>(scan.nPoints, 3, arma::distr_param(0, 255));
         for(uint32_t i=0; i<tempbody.nPoints; i++)
@@ -1044,6 +1042,9 @@ void fitMesh::showResult(const CScan& scan, const bool isNN, const vector<uint32
     }
     else
     {
+		//show scan points
+		if (showScan)
+			showPoints(cloud, scan.vPts, scan.vNorms, pcl::PointXYZRGB(192, 0, 0));
 		//show templete points
 		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
     }
@@ -1077,7 +1078,8 @@ void fitMesh::mainProcess()
 			coef.values[3] = 30;
 			viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
 			{
-				v.addSphere(coef);
+				v.addSphere(coef); 
+				v.addText("frame0", 100, 0, 12, 1, 0, 0, "frame");
 			});
 		}
 		fitShapePose(firstScan, 10, [](const uint32_t cur, const uint32_t iter, const double aLim) 
@@ -1110,6 +1112,7 @@ void fitMesh::mainProcess()
 			for (uint32_t a = 0; a < 3; ++a)
 				curMParam.pose[a] += (p2[a] + p3[a] - p0[a] - p1[a]) / (4 + 1);
 		}
+		printFrame(curFrame);
 		fitShapePose(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim)
 		{
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
@@ -1130,48 +1133,176 @@ void fitMesh::mainProcess()
 		modelParams.push_back(curMParam);
 		getchar();
 	}
-	printMParam("params.csv");
+	string fname("params_");
+	fname += baseFName.back();
+	fname += "_f" + std::to_string(curFrame);
+	saveMParam(fname);
+	if (modelParams.size() > scanFrames.size())
+	{
+		for (auto& mp : modelParams)
+			mp.setShape(curMParam.shape);
+	}
 	getchar();
 }
 
-void fitMesh::printMParam(const std::string& fname)
+void fitMesh::saveMParam(const std::string& fname)
 {
 	printf("writing final csv...");
-	FILE *fp = fopen(fname.c_str(), "w");
-	if (fp == nullptr)
+	string csvname = fname + ".csv";
+	FILE *fp = fopen(csvname.c_str(), "w");
+	if (fp != nullptr)
+	{
+		fprintf(fp, "MODEL_PARAMS,%d frames,\n,\n", modelParams.size());
+
+		fprintf(fp, "POSE_PARAM,\n,");
+		for (uint32_t a = 0; a < POSPARAM_NUM;)
+			fprintf(fp, "p%d,", a++);
+		fprintf(fp, "\n");
+		uint32_t idx = 0;
+		for (const auto& par : modelParams)
+		{
+			fprintf(fp, "f%d,", idx++);
+			for (uint32_t a = 0; a < POSPARAM_NUM; ++a)
+				fprintf(fp, "%f,", par.pose[a]);
+			fprintf(fp, "\n");
+		}
+
+		fprintf(fp, ",\nSHAPE_PARAM,\n,");
+		for (uint32_t a = 0; a < SHAPEPARAM_NUM;)
+			fprintf(fp, "p%d,", a++);
+		fprintf(fp, "\n");
+		idx = 0;
+		for (const auto& par : modelParams)
+		{
+			fprintf(fp, "f%d,", idx++);
+			for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
+				fprintf(fp, "%f,", par.shape[a]);
+			fprintf(fp, "\n");
+		}
+
+		fclose(fp);
+		printf("done\n");
+	}
+	else
+	{
+		printf("fail\n");
+	}
+
+	printf("writing final dat...");
+	string datname = fname + ".dat";
+	fp = fopen(datname.c_str(), "wb");
+	if (fp != nullptr)
+	{
+		uint32_t count = scanFrames.size();
+		fwrite(&count, sizeof(uint32_t), 1, fp);
+		count = modelParams.size();
+		fwrite(&count, sizeof(uint32_t), 1, fp);
+		fwrite(&modelParams[0], sizeof(ModelParam), count, fp);
+		fclose(fp);
+		printf("done\n");
+	}
+	else
+	{
+		printf("fail\n");
+	}
+}
+
+void fitMesh::watch(const std::string& fname)
+{
+	uint32_t scancount;
+	printf("reading final dat...");
+	string datname = fname + ".dat";
+	FILE *fp = fopen(datname.c_str(), "rb");
+	if (fp != nullptr)
+	{
+		fread(&scancount, sizeof(uint32_t), 1, fp);
+		uint32_t mpcount;
+		fread(&mpcount, sizeof(uint32_t), 1, fp);
+		modelParams.resize(mpcount);
+		fread(&modelParams[0], sizeof(ModelParam), mpcount, fp);
+		fclose(fp);
+		printf("done\n");
+	}
+	else
 	{
 		printf("fail\n");
 		return;
 	}
 
-	fprintf(fp, "MODEL_PARAMS,%d frames,\n,\n", modelParams.size());
-
-	fprintf(fp, "POSE_PARAM,\n,");
-	for (uint32_t a = 0; a < POSPARAM_NUM;)
-		fprintf(fp, "p%d,", a++);
-	fprintf(fp, "\n");
-	uint32_t idx = 0;
-	for (const auto& par : modelParams)
+	while (++curFrame < scancount)
 	{
-		fprintf(fp, "f%d,", idx++);
-		for (uint32_t a = 0; a < POSPARAM_NUM; ++a)
-			fprintf(fp, "%f,", par.pose[a]);
-		fprintf(fp, "\n");
+		scanFrames.push_back(CScan());
+		CScan& curScan = scanFrames.back();
+		if (!loadScan(curScan))
+			break;
+		DirectRigidAlign(curScan);
 	}
+	watch();
+}
 
-	fprintf(fp, ",\nSHAPE_PARAM,\n,");
-	for (uint32_t a = 0; a < SHAPEPARAM_NUM;)
-		fprintf(fp, "p%d,", a++);
-	fprintf(fp, "\n");
-	idx = 0;
-	for (const auto& par : modelParams)
+void fitMesh::watch()
+{
+	isEnd = false; isAnimate = false; isShowScan = true;
+	printf("========= Enter Watch Mode. =========\n");
+	printf("space  -animate switch\n");
+	printf("return -scan switch\n");
+	printf("ESC    -quit\n");
+	printf("L/R    -previous/next frame\n");
+	printf("\n");
+	curFrame = 0;
+	auto keyreg = viewer.registerKeyboardCallback([](const pcl::visualization::KeyboardEvent& event, void* pthis) 
 	{
-		fprintf(fp, "f%d,", idx++);
-		for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
-			fprintf(fp, "%f,", par.shape[a]);
-		fprintf(fp, "\n");
-	}
+		fitMesh& cthis = *(fitMesh*)pthis;
+		if (!cthis.isEnd && event.keyUp())
+		{
+			//printf("press key: %s\n", event.getKeySym().c_str());
+			if (!cthis.isAnimate)
+			{
+				int32_t f = cthis.curFrame;
+				if (event.getKeySym() == "Left")
+					f = std::max(f - 1, 0);
+				else if (event.getKeySym() == "Right")
+					f = std::min(int32_t(cthis.scanFrames.size() - 1), f + 1);
+				cthis.curFrame = f;
+			}
+			if (event.getKeySym() == "Escape")
+				cthis.isEnd = true;
+			else if (event.getKeySym() == "space")
+				cthis.isAnimate = !cthis.isAnimate;
+			else if (event.getKeySym() == "Return")
+				cthis.isShowScan = !cthis.isShowScan;
+		}
+	}, this);
 
-	fclose(fp);
-	printf("done\n");
+	bool gap = true;
+	while (!isEnd)
+	{
+		if (isAnimate && gap)
+		{
+			curFrame = (curFrame + 1) % scanFrames.size();
+		}
+		gap = !gap;
+		watch(curFrame);
+		sleepMS(18);
+	}
+	getchar();
+	keyreg.disconnect();
+	return;
+}
+void fitMesh::printFrame(const uint32_t frame)
+{
+	viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
+	{
+		v.updateText("frame" + std::to_string(frame), 100, 0, 12, 0, 1, 0, "frame");
+	});
+}
+void fitMesh::watch(const uint32_t frame)
+{
+	if (frame >= scanFrames.size())
+		return;
+	tempbody.updPoints(shapepose.getModelFast(modelParams[frame].shape, modelParams[frame].pose));
+	tempbody.calcFaces();
+	tempbody.calcNormals();
+	printFrame(frame);
+	showResult(scanFrames[frame], isShowScan);
 }

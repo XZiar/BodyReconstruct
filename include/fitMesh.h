@@ -34,8 +34,6 @@ struct CScan : public CBaseModel
 	arma::mat normals_orig;
     arma::mat points;
     arma::mat faces;
-    arma::mat pose_params;
-    arma::mat shape_params;
     arma::mat normals;
     arma::mat normals_faces;
     arma::mat landmarks;
@@ -113,6 +111,7 @@ public:
 	std::vector<ModelParam> modelParams;
 
 	uint32_t curFrame = 0;
+	std::atomic_bool isEnd, isAnimate, isShowScan = true;
 	SimpleLog logger;
 
 	bool isFastCost = false;
@@ -138,6 +137,9 @@ public:
 	void init(const std::string& baseName, const bool isOnce);
 	//The main process of the fitting procedue
 	void mainProcess();
+	//The function of watch the result
+	void watch();
+	void watch(const std::string& fname);
 private:
 	std::string baseFName;
 	bool mode = true;//true: one scan, false:scan sequence
@@ -178,9 +180,11 @@ private:
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/
-	void showResult(const CScan& scan, const bool isNN = false, const std::vector<uint32_t>* const idxs = nullptr);
+	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr);
 
-	void printMParam(const std::string& fname);
+	void saveMParam(const std::string& fname);
+	void watch(const uint32_t frame);
+	void printFrame(const uint32_t frame);
 };
 
 #endif // FITMESH_H
