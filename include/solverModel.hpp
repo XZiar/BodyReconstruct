@@ -186,6 +186,71 @@ public:
 	}
 };
 
+struct PoseCostFunctorMulti
+{
+private:
+	// this should be the firtst to declare in order to be initialized before other things
+	const CShapePose *shapepose_;
+	const arColIS isValidNN_;
+	const VertexVec ptCache;
+	const VertexVec basePt;
+	const std::vector<float> weights;
+
+	static VertexVec buildCache(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const VertexVec& validScanCache_)
+	{
+		VertexVec baseVec = shapepose->getModelFast(modelParam.shape, modelParam.pose);
+		const char *pValid = isValidNN.memptr();
+		for (uint32_t a = 0, b = 0; a < isValidNN.n_elem; ++a)
+		{
+			if (pValid[a])
+				baseVec[a] = validScanCache_[b++];
+		}
+		return baseVec;
+	}
+	static std::vector<float> buildCache(const arColIS& isValidNN, const std::vector<float>& wgts = std::vector<float>())
+	{
+		std::vector<float> weights(isValidNN.n_elem, 0.35f);
+		const bool isWgt = (wgts.size() > 0);
+		const char *pValid = isValidNN.memptr();
+		for (uint32_t a = 0, b = 0; a < isValidNN.n_elem; ++a)
+		{
+			if (pValid[a])
+				weights[a] = (isWgt ? wgts[b++] : 1);
+		}
+		return weights;
+	}
+public:
+	PoseCostFunctorMulti(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& preParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+		const std::vector<float>& wgts = std::vector<float>())
+		: shapepose_(shapepose), isValidNN_(isValidNN), weights(buildCache(isValidNN, wgts)),
+		basePt(shapepose_->getBaseModel(modelParam.shape)), ptCache(buildCache(shapepose, preParam, isValidNN, validScanCache))
+	{
+	}
+	//pose is the parameters to be estimated, b is the bias, residual is to return
+	bool operator()(const double *pose, double *residual) const
+	{
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		auto *__restrict pValid = isValidNN_.memptr();
+		const auto pts = shapepose_->getModelByPose(basePt, pose);
+
+		const uint32_t cnt = isValidNN_.n_elem;
+		for (uint32_t i = 0, j = 0; j < cnt; ++j, i += 3)
+		{
+			const Vertex delta = (ptCache[j] - pts[j]) * weights[j];
+			residual[i + 0] = delta.x;
+			residual[i + 1] = delta.y;
+			residual[i + 2] = delta.z;
+		}
+
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
+
 struct PoseRegularizer
 {
 private:
@@ -238,7 +303,8 @@ private:
 	const double(&poseParam)[POSPARAM_NUM];
 	const double weight;
 public:
-	MovementSofter(const ModelParam& modelParam, const double w) :poseParam(modelParam.pose), weight(w) { }
+	MovementSofter(const ModelParam& modelParam, const double err) :poseParam(modelParam.pose),
+		weight(sqrt(err / (POSPARAM_NUM - 6))) { }
 	bool operator()(const double* pose, double* residual) const
 	{
 		uint32_t i = 0;

@@ -14,14 +14,30 @@ void sleepMS(uint32_t ms)
 {
 	std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
-bool yesORno(const char *str)
+bool yesORno(const char *str, const bool expect)
 {
 	if (isVtune)
-		return true;
-	printf("%s(y/n): ", str);
-	int key = getchar();
+		return expect;
+	while (true)
+	{
+		printf("%s(y/n): ", str);
+		const int key = getchar();
+		if (key == 'y' || key == 'n')
+		{
+			getchar();
+			return key == 'y';
+		}
+	}
+}
+int32_t inputNumber(const char *str, const int32_t expect)
+{
+	if (isVtune)
+		return expect;
+	printf("%s : ", str);
+	int32_t num = expect;
+	scanf("%d", &num);
 	getchar();
-	return key == 'y';
+	return num;
 }
 bool isVtune = false;
 
@@ -56,9 +72,14 @@ int main(int argc, char *argv[])
 	if (!isVtune)
 	{
 		if (yesORno("load previous param to watch?"))
-			meshFittor.watch("params_n_f70");
+		{
+			const auto fcnt = inputNumber("up to how many frames?", 70);
+			meshFittor.watch(fcnt);
+		}
 		else
 			meshFittor.watch();
+		printf("\nFinished!\n");
+		getchar();
 	}
     return 0;
 }

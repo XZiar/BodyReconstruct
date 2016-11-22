@@ -139,7 +139,7 @@ public:
 	void mainProcess();
 	//The function of watch the result
 	void watch();
-	void watch(const std::string& fname);
+	void watch(const uint32_t frameCount);
 private:
 	std::string baseFName;
 	bool mode = true;//true: one scan, false:scan sequence
@@ -147,7 +147,7 @@ private:
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
-	ModelParam curMParam, bakMParam;
+	ModelParam curMParam, bakMParam, tmpMParam;
 	PtrModSmooth msmooth;
 
 	void loadTemplate();
@@ -168,8 +168,8 @@ private:
 	void fitShapePose(const CScan& scan, const uint32_t iter, 
 		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
 	void fitFinalShape(const uint32_t iter);
-	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
-	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, ModelParam& tpParam, const double lastErr);
+	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
+	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
 	
 	/** @brief nnFilter
 	 ** @param -angLim  max angle(in degree) between two norms
@@ -182,8 +182,9 @@ private:
 	 **/
 	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr);
 
+	std::string buildName(const uint32_t frame);
 	void saveMParam(const std::string& fname);
-	void watch(const uint32_t frame);
+	void showFrame(const uint32_t frame);
 	void printFrame(const uint32_t frame);
 };
 

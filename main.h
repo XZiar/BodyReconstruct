@@ -36,5 +36,6 @@ constexpr uint32_t EVALUATE_POINTS_NUM = 6449;
 uint64_t getCurTime();
 uint64_t getCurTimeNS();
 void sleepMS(uint32_t ms);
-bool yesORno(const char *str);
+bool yesORno(const char *str, const bool expect = true);
+int inputNumber(const char *str, const int32_t expect);
 extern bool isVtune;
