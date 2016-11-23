@@ -11,7 +11,7 @@ static uint32_t nncnt = 0, nntime = 0;
 //Definition of optimization functions
 struct PoseCostFunctor
 {
-private:
+protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const arColIS isValidNN_;
@@ -19,7 +19,7 @@ private:
 	const VertexVec basePts;
 
 public:
-	PoseCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+	PoseCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& scanCache)
 		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape))
 	{
 	}
@@ -37,9 +37,7 @@ public:
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x;
-				residual[i + 1] = delta.y;
-				residual[i + 2] = delta.z;
+				residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
 				i += 3;
 			}
 		}
@@ -54,14 +52,14 @@ public:
 };
 struct ShapeCostFunctor
 {
-private:
+protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const double(&poseParam_)[POSPARAM_NUM];
 	const arColIS isValidNN_;
 	const VertexVec& scanCache_;
 public:
-	ShapeCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& scanCache)
+	ShapeCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& scanCache)
 		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
 	{
 	}
@@ -79,9 +77,7 @@ public:
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x;
-				residual[i + 1] = delta.y;
-				residual[i + 2] = delta.z;
+				residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
 				i += 3;
 			}
 		}
@@ -93,9 +89,35 @@ public:
 		return true;
 	}
 };
+struct ShapeCostFunctor_D : public ShapeCostFunctor
+{
+	using ShapeCostFunctor::ShapeCostFunctor;
+	bool operator()(const double* shape, double* residual) const
+	{
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		const auto *__restrict pValid = isValidNN_.memptr();
+		const auto pts = shapepose_->getModelFast(shape, poseParam_);
+
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+		{
+			if (pValid[j])
+				residual[j] = (scanCache_[j] - pts[j]).length();
+			else
+				residual[j] = 0;
+		}
+
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
+
 struct PoseCostFunctorEx2
 {
-private:
+protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const arColIS isValidNN_;
@@ -104,13 +126,13 @@ private:
 	const PtrModSmooth mSmooth;
 	std::vector<float> weights;
 public:
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
 		PtrModSmooth mSmooth_)
 		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
 	}
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
 		PtrModSmooth mSmooth_, const std::vector<float>& wgts)
 		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
@@ -128,13 +150,10 @@ public:
 		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, pValid);
 
 		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
+		for (uint32_t i = 0, j = 0; j < cnt; ++j, i += 3)
 		{
 			const Vertex delta = (validScanCache_[j] - pts[j]) * (isWgt ? weights[j] : 1);
-			residual[i + 0] = delta.x;
-			residual[i + 1] = delta.y;
-			residual[i + 2] = delta.z;
-			i += 3;
+			residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
 		}
 		memset(&residual[3 * cnt], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
 
@@ -144,9 +163,35 @@ public:
 		return true;
 	}
 };
+struct PoseCostFunctorEx2_D : public PoseCostFunctorEx2
+{
+	using PoseCostFunctorEx2::PoseCostFunctorEx2;
+	bool operator()(const double* pose, double* residual) const
+	{
+		const bool isWgt = (weights.size() > 0);
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		auto *__restrict pValid = isValidNN_.memptr();
+		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, pValid);
+
+		const uint32_t cnt = validScanCache_.size();
+		for (uint32_t i = 0, j = 0; j < cnt; ++j)
+		{
+			const Vertex delta = (validScanCache_[j] - pts[j]);
+			residual[i++] = delta.length() * (isWgt ? weights[j] : 1);
+		}
+		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
+
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
 struct ShapeCostFunctorEx2
 {
-private:
+protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const double(&poseParam_)[POSPARAM_NUM];
@@ -154,7 +199,7 @@ private:
 	const VertexVec& validScanCache_;
 	const PtrModSmooth mSmooth;
 public:
-	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
 		PtrModSmooth mSmooth_)
 		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_)
 	{
@@ -185,10 +230,34 @@ public:
 		return true;
 	}
 };
-
-struct PoseCostFunctorMulti
+struct ShapeCostFunctorEx2_D : public ShapeCostFunctorEx2
 {
-private:
+	using ShapeCostFunctorEx2::ShapeCostFunctorEx2;
+	bool operator()(const double* shape, double* residual) const
+	{
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		const auto *__restrict pValid = isValidNN_.memptr();
+		const auto pts = shapepose_->getModelFast2(mSmooth, shape, poseParam_, pValid);
+
+		const uint32_t cnt = validScanCache_.size();
+		for (uint32_t i = 0, j = 0; j < cnt; ++j)
+		{
+			residual[i++] = (validScanCache_[j] - pts[j]).length();
+		}
+		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
+
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
+
+struct PoseCostFunctorPred
+{
+protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const arColIS isValidNN_;
@@ -220,7 +289,7 @@ private:
 		return weights;
 	}
 public:
-	PoseCostFunctorMulti(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& preParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
+	PoseCostFunctorPred(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& preParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
 		const std::vector<float>& wgts = std::vector<float>())
 		: shapepose_(shapepose), isValidNN_(isValidNN), weights(buildCache(isValidNN, wgts)),
 		basePt(shapepose_->getBaseModel(modelParam.shape)), ptCache(buildCache(shapepose, preParam, isValidNN, validScanCache))
@@ -232,11 +301,8 @@ public:
 		uint64_t t1, t2;
 		t1 = getCurTimeNS();
 
-		auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelByPose(basePt, pose);
-
-		const uint32_t cnt = isValidNN_.n_elem;
-		for (uint32_t i = 0, j = 0; j < cnt; ++j, i += 3)
+		for (uint32_t i = 0, j = 0; j < EVALUATE_POINTS_NUM; ++j, i += 3)
 		{
 			const Vertex delta = (ptCache[j] - pts[j]) * weights[j];
 			residual[i + 0] = delta.x;
@@ -250,10 +316,30 @@ public:
 		return true;
 	}
 };
+struct PoseCostFunctorPred_D : public PoseCostFunctorPred
+{
+	using PoseCostFunctorPred::PoseCostFunctorPred;
+	bool operator()(const double *pose, double *residual) const
+	{
+		uint64_t t1, t2;
+		t1 = getCurTimeNS();
+
+		const auto pts = shapepose_->getModelByPose(basePt, pose);
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+		{
+			residual[j] = (ptCache[j] - pts[j]).length() * weights[j];
+		}
+
+		runcnt++;
+		t2 = getCurTimeNS();
+		runtime += (uint32_t)((t2 - t1) / 1000);
+		return true;
+	}
+};
 
 struct PoseRegularizer
 {
-private:
+protected:
 	int dim_;
 	double weight_;
 public:
@@ -277,7 +363,7 @@ public:
 
 struct ShapeRegularizer
 {
-private:
+protected:
 	int dim_;
 	double weight_;
 public:
@@ -299,7 +385,7 @@ public:
 
 struct MovementSofter
 {
-private:
+protected:
 	const double(&poseParam)[POSPARAM_NUM];
 	const double weight;
 public:
@@ -317,7 +403,7 @@ public:
 };
 struct ShapeSofter
 {
-private:
+protected:
 	const double(&shapeParam)[SHAPEPARAM_NUM];
 	const double weight;
 public:
@@ -326,48 +412,6 @@ public:
 	{
 		for (uint32_t i = 0; i < SHAPEPARAM_NUM; ++i)
 			residual[i] = weight * abs(shape[i] - shapeParam[i]);
-		return true;
-	}
-};
-
-struct MultiShapeCostFunctor
-{
-private:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const std::vector<ModelParam>& datParams;
-	const std::vector<arColIS>& datNNs;
-	const std::vector<VertexVec>& datScans;
-public:
-	MultiShapeCostFunctor(CShapePose *shapepose,
-		const std::vector<ModelParam>& datParams_, const std::vector<arColIS>& datNNs_, const std::vector<VertexVec>& datScans_)
-		: shapepose_(shapepose), datParams(datParams_), datNNs(datNNs_), datScans(datScans_)
-	{
-		runtime = 0;
-	}
-	bool operator() (const double* shape, double* residual) const
-	{
-		const auto len = datNNs[0].n_elem;
-		memset(residual, 0x0, sizeof(double)*len);
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
-		for (uint32_t a = 0; a < datParams.size(); ++a)
-		{
-			const auto pts = shapepose_->getModelFast(shape, datParams[a].pose);
-			const auto *__restrict pValid = datNNs[a].memptr();
-			const auto& curScan = datScans[a];
-			for (uint32_t i = 0, j = 0; j < len; ++j, i += 3)
-				if (pValid[j])
-				{
-					const Vertex delta = curScan[j] - pts[j];
-					residual[i + 0] += delta.x;
-					residual[i + 1] += delta.y;
-					residual[i + 2] += delta.z;
-				}
-		}
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
 		return true;
 	}
 };

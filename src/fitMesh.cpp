@@ -700,72 +700,6 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
 	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
-void fitMesh::fitFinalShape(const uint32_t iter)
-{
-	double err = 0;
-	uint32_t sumVNN;
-	tSPose = tSShape = tMatchNN = 0;
-	cSPose = cSShape = cMatchNN = 0;
-
-	bool solvedS = false, solvedP = false;
-	vector<uint32_t> idxMapper(tempbody.nPoints);
-
-	Solver::Options options;
-	options.minimizer_type = ceres::TRUST_REGION;
-	options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-	options.linear_solver_type = ceres::DENSE_QR;
-	options.num_threads = 2;
-	options.num_linear_solver_threads = 4;
-	options.minimizer_progress_to_stdout = true;
-
-	//Optimization Loop
-	for (uint32_t a = 0; a < iter; ++a)
-	{
-		double *shape = curMParam.shape;
-		Problem problem;
-		cout << "construct problem: SHAPE\n";
-
-		vector<arColIS> NNs;
-		vector<VertexVec> scans;
-		scans.reserve(modelParams.size());
-		for (uint32_t b = 0; b < modelParams.size(); ++b)
-		{
-			const auto curScan = scanFrames[b];
-			auto mPar = modelParams[b];
-			mPar.setShape(curMParam.shape);
-			//prepare nn-data
-			arColIS validNN;
-			sumVNN = updatePoints(curScan, mPar, angleLimit*1.1, idxMapper, validNN, err);
-			showResult(curScan);
-			scans.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
-
-			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
-				(new ShapeCostFunctor(&shapepose, modelParams[b], validNN, scans.back()));
-			problem.AddResidualBlock(cost_function, NULL, shape);
-		}
-
-		Solver::Summary summary;
-		cout << "solving...\n";
-		runcnt.store(0); runtime.store(0);
-		ceres::Solve(options, &problem, &summary);
-
-		cout << summary.BriefReport();
-		tSShape += runtime; cSShape += runcnt;
-		const double rt = runtime; const uint32_t rc = runcnt;
-		logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
-
-		cout << "========================================\n";
-		printArray("shape param", curMParam.shape);
-		cout << "----------------------------------------\n";
-	}
-	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
-	showResult(scanFrames.back());
-	//wait until the window is closed
-	cout << "optimization finished\n";
-	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
-	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
-}
-
 void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter)
 {
 	double *pose = curMParam.pose;
@@ -775,16 +709,28 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 
 	if (curFrame > 0 && curiter > 0)
 	{
+		/*
 		auto *cost_functionMulti = new ceres::NumericDiffCostFunction<PoseCostFunctorMulti, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
 			(isAngWgt ? new PoseCostFunctorMulti(&shapepose, curMParam, tmpMParam, isValidNN, scanCache, weights) :
 				new PoseCostFunctorMulti(&shapepose, curMParam, tmpMParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionMulti, NULL, pose);
+		*/
+		auto *cost_functionMulti = new ceres::NumericDiffCostFunction<PoseCostFunctorPred_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(isAngWgt ? new PoseCostFunctorPred_D(&shapepose, curMParam, tmpMParam, isValidNN, scanCache, weights) :
+				new PoseCostFunctorPred_D(&shapepose, curMParam, tmpMParam, isValidNN, scanCache));
+		problem.AddResidualBlock(cost_functionMulti, NULL, pose);
 	}
 	else if (isFastCost)
 	{
+		/*
 		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, POSPARAM_NUM>
 			(isAngWgt ? new PoseCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth, weights) :
 				new PoseCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth));
+		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
+		*/
+		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(isAngWgt ? new PoseCostFunctorEx2_D(&shapepose, curMParam, isValidNN, scanCache, msmooth, weights) :
+				new PoseCostFunctorEx2_D(&shapepose, curMParam, isValidNN, scanCache, msmooth));
 		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
 	}
 	else
@@ -820,7 +766,6 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	const double rt = runtime; const uint32_t rc = runcnt;
 	logger.log(summary.FullReport()).log(true, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
-
 void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr)
 {
 	double *shape = curMParam.shape;
@@ -830,8 +775,13 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 
 	if (isFastCost)
 	{
+		/*
 		auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM * 3, SHAPEPARAM_NUM>
 			(new ShapeCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth));
+		problem.AddResidualBlock(cost_functionEx2, NULL, shape);
+		*/
+		auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorEx2_D(&shapepose, curMParam, isValidNN, scanCache, msmooth));
 		problem.AddResidualBlock(cost_functionEx2, NULL, shape);
 	}
 	else
@@ -862,6 +812,113 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
     
+	cout << summary.BriefReport();
+	tSShape += runtime; cSShape += runcnt;
+	const double rt = runtime; const uint32_t rc = runcnt;
+	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+}
+
+void fitMesh::fitFinalShape(const uint32_t iter)
+{
+	isFastCost = true;
+	double err = 0;
+	uint32_t sumVNN;
+	tSPose = tSShape = tMatchNN = 0;
+	cSPose = cSShape = cMatchNN = 0;
+
+	bool solvedS = false, solvedP = false;
+	vector<uint32_t> idxMapper(tempbody.nPoints);
+
+	Solver::Options options;
+	options.minimizer_type = ceres::TRUST_REGION;
+	options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+	options.linear_solver_type = ceres::DENSE_QR;
+	options.num_threads = 2;
+	options.num_linear_solver_threads = 2;
+	options.minimizer_progress_to_stdout = true;
+
+	//Optimization Loop
+	for (uint32_t a = 0; a < iter / 2; ++a)
+	{
+		solveAllShape(angleLimit*1.2, options);
+		printArray("\nshape param", curMParam.shape);
+		cout << "========================================\n";
+	}
+	bakMParam = curMParam;
+	for (curFrame = 0; curFrame < modelParams.size(); ++curFrame)
+	{
+		curMParam.setPose(modelParams[curFrame].pose);
+		if (curFrame == 0 || curFrame == modelParams.size() - 1)
+			tmpMParam.setPose(curMParam.pose);
+		else
+		{
+			const auto& prev = modelParams[curFrame - 1], &next = modelParams[curFrame + 1];
+			for (uint32_t b = 0; b < POSPARAM_NUM; ++b)
+				tmpMParam.pose[b] = curMParam.pose[b];
+			for (uint32_t b = 6; b < POSPARAM_NUM; ++b)
+				tmpMParam.pose[b] = (prev.pose[b] * 0.2 + next.pose[b] * 0.2 + curMParam.pose[b]) / 1.4;
+		}
+
+		const auto& curScan = scanFrames[curFrame];
+		sumVNN = updatePoints(curScan, curMParam, angleLimit, idxMapper, isValidNN_, err);
+		showResult(curScan);
+
+		const auto scanCache = shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.memptr() : nullptr);
+		msmooth = shapepose.preCompute(isValidNN_.memptr());
+
+		solvePose(scanCache, isValidNN_, err, 1);
+
+		modelParams[curFrame].setPose(curMParam.pose);
+	}
+	curMParam = bakMParam;
+	for (uint32_t a = iter / 2; a < iter; ++a)
+	{
+		solveAllShape(angleLimit*1.1, options);
+		printArray("\nshape param", curMParam.shape);
+		cout << "========================================\n";
+	}
+
+	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
+	showResult(scanFrames.back());
+	//wait until the window is closed
+	cout << "optimization finished\n";
+	logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+}
+void fitMesh::solveAllShape(const double angLim, const Solver::Options& options)
+{
+	uint32_t sumVNN;
+	double err = 0;
+	vector<uint32_t> idxMapper(tempbody.nPoints);
+	double *shape = curMParam.shape;
+	Problem problem;
+	cout << "construct problem: SHAPE\n";
+
+	vector<VertexVec> scanPts;
+	scanPts.reserve(modelParams.size());
+	for (uint32_t b = 0; b < modelParams.size(); ++b)
+	{
+		const auto& curScan = scanFrames[b];
+		auto mPar = modelParams[b];
+		mPar.setShape(curMParam.shape);
+		//prepare nn-data
+		arColIS validNN;
+		sumVNN = updatePoints(curScan, mPar, angLim, idxMapper, validNN, err);
+		logger.log(true, "NN matched : %d \n", sumVNN);
+		showResult(curScan);
+		scanPts.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
+
+		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctor_D(&shapepose, modelParams[b], validNN, scanPts.back()));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
+
+	Solver::Summary summary;
+	cout << "solving...\n";
+	runcnt.store(0); runtime.store(0);
+	ceres::Solve(options, &problem, &summary);
+
 	cout << summary.BriefReport();
 	tSShape += runtime; cSShape += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;

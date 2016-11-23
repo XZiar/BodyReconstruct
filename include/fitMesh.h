@@ -170,6 +170,7 @@ private:
 	void fitFinalShape(const uint32_t iter);
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
+	void solveAllShape(const double angLim, const ceres::Solver::Options& options);
 	
 	/** @brief nnFilter
 	 ** @param -angLim  max angle(in degree) between two norms
