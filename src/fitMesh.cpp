@@ -21,6 +21,7 @@ using arma::mean;
 using ceres::Problem;
 using ceres::Solver;
 using miniBLAS::Vertex;
+using miniBLAS::VertexI;
 using miniBLAS::VertexVec;
 
 using PointT = pcl::PointXYZRGBNormal;
@@ -246,28 +247,14 @@ static void printArray(const char* str, const double(&array)[N])
 	printf("\n");
 }
 
-static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const arma::mat& model, pcl::PointXYZRGB color)
+static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const VertexVec& model, pcl::PointXYZRGB color)
 {
-    model.each_row([&](const arma::rowvec &row)
-    {
-        color.x = row(0);
-        color.y = row(1);
-        color.z = row(2);
-        cloud->push_back(color);
-    });
-}
-static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const arma::mat& model, const arma::mat& norm, pcl::PointXYZRGB color)
-{
-    uint32_t idx = 0;
-    model.each_row([&](const arma::rowvec &row)
-    {
-        const double y = norm.row(idx++)(1);
-		color.b = (uint8_t)(y * 32 + (y > 0 ? 255-32 : 32));
-        color.x = row(0);
-        color.y = row(1);
-        color.z = row(2);
-        cloud->push_back(color);
-    });
+	for (uint32_t i = 0; i < model.size(); ++i)
+	{
+		const Vertex& pt = model[i];
+		color.x = pt.x; color.y = pt.y; color.z = pt.z;
+		cloud->push_back(color);
+	}
 }
 static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const VertexVec& model, const VertexVec& norm, pcl::PointXYZRGB color)
 {
@@ -366,6 +353,7 @@ bool fitMesh::loadScan(CScan& scan)
 	scan.nPoints = cloud_tmp->points.size();
 	scan.points_orig.resize(scan.nPoints, 3);
 	scan.normals_orig.resize(scan.nPoints, 3);
+	scan.vColors.reserve(scan.nPoints);
 	uint32_t idx = 0;
 	if (mode)
 	{
@@ -384,6 +372,11 @@ bool fitMesh::loadScan(CScan& scan)
 			scan.normals_orig.row(idx) = arma::rowvec({ -pt.normal_y, pt.normal_z, -pt.normal_x });
 			idx++;
 		}
+	}
+	for (uint32_t a = 0; a < scan.nPoints; ++a)
+	{
+		const PointT& pt = cloud_tmp->points[a];
+		scan.vColors.push_back(VertexI(pt.r, pt.b, pt.b));
 	}
 	//normalize the normals
 	scan.normals_orig = arma::normalise(scan.normals_orig, 2, 1);
@@ -847,6 +840,7 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 	bakMParam = curMParam;
 	for (curFrame = 0; curFrame < modelParams.size(); ++curFrame)
 	{
+		printFrame(curFrame);
 		curMParam.setPose(modelParams[curFrame].pose);
 		if (curFrame == 0 || curFrame == modelParams.size() - 1)
 			tmpMParam.setPose(curMParam.pose);
@@ -899,6 +893,7 @@ void fitMesh::solveAllShape(const double angLim, const Solver::Options& options)
 	scanPts.reserve(modelParams.size());
 	for (uint32_t b = 0; b < modelParams.size(); ++b)
 	{
+		printFrame(b);
 		const auto& curScan = scanFrames[b];
 		auto mPar = modelParams[b];
 		mPar.setShape(curMParam.shape);
@@ -972,16 +967,16 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 	tempbody.calcFaces();
 	tempbody.calcNormals();
 
-	uint64_t t1, t2;
+	SimpleTimer timer;
 	/*
 	cv::Mat idxsNNOLD(1, 1, CV_32S); cv::Mat distNNOLD(1, 1, CV_32FC1);
 	if(useFLANN)
 	{
-		t1 = getCurTime();
+		timer.Start();
 		cv::Mat cvPointsSM = armaTOcv(tempbody.points);
 		scan.kdtree->knnSearch(cvPointsSM, idxsNNOLD, distNNOLD, 1);//the distance is L2 which is |D|^2
-		t2 = getCurTime();
-		logger.log(true, "cvFLANN uses %lld ms.\n", t2 - t1);
+		timer.Stop();
+		logger.log(true, "cvFLANN uses %lld ms.\n", timer.ElapseMs());
 		if (idxsNNOLD.rows != tempbody.nPoints)
 		{
 			cout << "error of the result of knn search \n";
@@ -997,14 +992,11 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 	{
 		if(curFrame > 0 && isRayTrace)
 			raytraceCut(nnres);
-
-		t1 = getCurTime();
-		
+		timer.Start();
 		scan.nntree.searchOnAnglePan(nnres, tempbody.vPts, tempbody.vNorms, angLim*1.1f, angleLimit / 2);
-
-		t2 = getCurTime();
-		cMatchNN++; tMatchNN += t2 - t1;
-		logger.log(true, "avxNN uses %lld ms.\n", t2 - t1);
+		timer.Stop();
+		cMatchNN++; tMatchNN += timer.ElapseMs();
+		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
 		memcpy(pidxNN, nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
 		weights = nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
@@ -1109,6 +1101,23 @@ void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<ui
     }
 	viewer.showCloud(cloud);
 }
+void fitMesh::showColorResult(const CScan& scan, const bool showScan)
+{
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+	if (showScan)
+	{
+		for (uint32_t i = 0; i < scan.nPoints; ++i)
+		{
+			const Vertex& pt = scan.vPts[i];
+			const VertexI& clr = scan.vColors[i];
+			pcl::PointXYZRGB obj(clr.x, clr.y, clr.z);
+			obj.x = pt.x; obj.y = pt.y; obj.z = pt.z;
+			cloud->push_back(obj);
+		}
+	}
+	showPoints(cloud, tempbody.vPts, pcl::PointXYZRGB(0, 192, 0));
+	viewer.showCloud(cloud);
+}
 
 void fitMesh::init(const std::string& baseName, const bool isOnce)
 {
@@ -1123,6 +1132,7 @@ void fitMesh::init(const std::string& baseName, const bool isOnce)
 void fitMesh::mainProcess()
 {
 	scanFrames.clear();
+	setTitle("Reconstructing...");
 	{
 		scanFrames.push_back(CScan());
 		CScan& firstScan = scanFrames.back();
@@ -1189,6 +1199,7 @@ void fitMesh::mainProcess()
 	}
 	if (yesORno("run final optimization on SHAPE?"))
 	{
+		setTitle("Final Optimazing...");
 		fitFinalShape(6);
 		printf("final optimization finished.\n");
 		modelParams.push_back(curMParam);
@@ -1307,6 +1318,11 @@ void fitMesh::watch(const uint32_t frameCount)
 
 void fitMesh::watch()
 {
+	viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
+	{
+		v.setBackgroundColor(0.25, 0.25, 0.25);
+	});
+	setTitle("Watching Mode");
 	isEnd = false; isAnimate = false; isShowScan = true;
 	printf("========= Enter Watch Mode. =========\n");
 	printf("space  -animate switch\n");
@@ -1369,6 +1385,14 @@ void fitMesh::printFrame(const uint32_t frame)
 		v.updateText("frame" + std::to_string(frame), 100, 0, 12, 0, 1, 0, "frame");
 	});
 }
+void fitMesh::setTitle(const std::string& title)
+{
+	viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
+	{
+		v.setWindowName(title);
+	});
+}
+
 void fitMesh::showFrame(const uint32_t frame)
 {
 	if (frame >= scanFrames.size())
@@ -1377,5 +1401,5 @@ void fitMesh::showFrame(const uint32_t frame)
 	tempbody.calcFaces();
 	tempbody.calcNormals();
 	printFrame(frame);
-	showResult(scanFrames[frame], isShowScan);
+	showColorResult(scanFrames[frame], isShowScan);
 }

@@ -26,8 +26,7 @@ public:
 	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose, double* residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto pts = shapepose_->getModelByPose(basePts, pose);
 		auto *__restrict pValid = isValidNN_.memptr();
@@ -37,16 +36,16 @@ public:
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
+				delta.save<3>(&residual[i]);
 				i += 3;
 			}
 		}
 		//printf("now i=%d, total=%d, demand=%d\n", i, isValidNN_.n_elem * 3, 3 * EVALUATE_POINTS_NUM);
 		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -66,8 +65,7 @@ public:
 	//w is the parameters to be estimated, b is the bias, residual is to return
 	bool operator() (const double* shape, double* residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelFast(shape, poseParam_);
@@ -77,15 +75,15 @@ public:
 			if (pValid[j])
 			{
 				const Vertex delta = scanCache_[j] - pts[j];
-				residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
+				delta.save<3>(&residual[i]);
 				i += 3;
 			}
 		}
 		memset(&residual[i], 0, sizeof(double) * (3 * EVALUATE_POINTS_NUM - i));
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -94,8 +92,7 @@ struct ShapeCostFunctor_D : public ShapeCostFunctor
 	using ShapeCostFunctor::ShapeCostFunctor;
 	bool operator()(const double* shape, double* residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelFast(shape, poseParam_);
@@ -108,9 +105,9 @@ struct ShapeCostFunctor_D : public ShapeCostFunctor
 				residual[j] = 0;
 		}
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -127,13 +124,7 @@ protected:
 	std::vector<float> weights;
 public:
 	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
-		PtrModSmooth mSmooth_)
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
-		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
-	{
-	}
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
-		PtrModSmooth mSmooth_, const std::vector<float>& wgts)
+		PtrModSmooth mSmooth_, const std::vector<float>& wgts = std::vector<float>())
 		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape, isValidNN_.memptr()))
 	{
@@ -143,8 +134,7 @@ public:
 	bool operator()(const double* pose, double* residual) const
 	{
 		const bool isWgt = (weights.size() > 0);
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, pValid);
@@ -153,13 +143,13 @@ public:
 		for (uint32_t i = 0, j = 0; j < cnt; ++j, i += 3)
 		{
 			const Vertex delta = (validScanCache_[j] - pts[j]) * (isWgt ? weights[j] : 1);
-			residual[i + 0] = delta.x; residual[i + 1] = delta.y; residual[i + 2] = delta.z;
+			delta.save<3>(&residual[i]);
 		}
 		memset(&residual[3 * cnt], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -169,8 +159,7 @@ struct PoseCostFunctorEx2_D : public PoseCostFunctorEx2
 	bool operator()(const double* pose, double* residual) const
 	{
 		const bool isWgt = (weights.size() > 0);
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, pValid);
@@ -183,9 +172,9 @@ struct PoseCostFunctorEx2_D : public PoseCostFunctorEx2
 		}
 		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -207,26 +196,22 @@ public:
 	//w is the parameters to be estimated, b is the bias, residual is to return
 	bool operator() (const double* shape, double* residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelFast2(mSmooth, shape, poseParam_, pValid);
 
 		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
+		for (uint32_t i = 0, j = 0; j < cnt; ++j, i += 3)
 		{
 			const Vertex delta = validScanCache_[j] - pts[j];
-			residual[i + 0] = delta.x;
-			residual[i + 1] = delta.y;
-			residual[i + 2] = delta.z;
-			i += 3;
+			delta.save<3>(&residual[i]);
 		}
 		memset(&residual[3 * cnt], 0, sizeof(double) * 3 * (EVALUATE_POINTS_NUM - cnt));
 
-		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		timer.Stop();
+		runcnt++; 
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -235,8 +220,7 @@ struct ShapeCostFunctorEx2_D : public ShapeCostFunctorEx2
 	using ShapeCostFunctorEx2::ShapeCostFunctorEx2;
 	bool operator()(const double* shape, double* residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto *__restrict pValid = isValidNN_.memptr();
 		const auto pts = shapepose_->getModelFast2(mSmooth, shape, poseParam_, pValid);
@@ -248,9 +232,9 @@ struct ShapeCostFunctorEx2_D : public ShapeCostFunctorEx2
 		}
 		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
 
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };
@@ -269,7 +253,7 @@ protected:
 	{
 		VertexVec baseVec = shapepose->getModelFast(modelParam.shape, modelParam.pose);
 		const char *pValid = isValidNN.memptr();
-		for (uint32_t a = 0, b = 0; a < isValidNN.n_elem; ++a)
+		for (uint32_t a = 0, b = 0; a < EVALUATE_POINTS_NUM; ++a)
 		{
 			if (pValid[a])
 				baseVec[a] = validScanCache_[b++];
@@ -278,10 +262,10 @@ protected:
 	}
 	static std::vector<float> buildCache(const arColIS& isValidNN, const std::vector<float>& wgts = std::vector<float>())
 	{
-		std::vector<float> weights(isValidNN.n_elem, 0.35f);
+		std::vector<float> weights(EVALUATE_POINTS_NUM, 0.35f);
 		const bool isWgt = (wgts.size() > 0);
 		const char *pValid = isValidNN.memptr();
-		for (uint32_t a = 0, b = 0; a < isValidNN.n_elem; ++a)
+		for (uint32_t a = 0, b = 0; a < EVALUATE_POINTS_NUM; ++a)
 		{
 			if (pValid[a])
 				weights[a] = (isWgt ? wgts[b++] : 1);
@@ -298,21 +282,17 @@ public:
 	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double *pose, double *residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto pts = shapepose_->getModelByPose(basePt, pose);
 		for (uint32_t i = 0, j = 0; j < EVALUATE_POINTS_NUM; ++j, i += 3)
 		{
 			const Vertex delta = (ptCache[j] - pts[j]) * weights[j];
-			residual[i + 0] = delta.x;
-			residual[i + 1] = delta.y;
-			residual[i + 2] = delta.z;
+			delta.save<3>(&residual[i]);
 		}
-
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += uint32_t(timer.ElapseUs());
 		return true;
 	}
 };
@@ -321,18 +301,16 @@ struct PoseCostFunctorPred_D : public PoseCostFunctorPred
 	using PoseCostFunctorPred::PoseCostFunctorPred;
 	bool operator()(const double *pose, double *residual) const
 	{
-		uint64_t t1, t2;
-		t1 = getCurTimeNS();
+		SimpleTimer timer;
 
 		const auto pts = shapepose_->getModelByPose(basePt, pose);
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
 		{
 			residual[j] = (ptCache[j] - pts[j]).length() * weights[j];
 		}
-
+		timer.Stop();
 		runcnt++;
-		t2 = getCurTimeNS();
-		runtime += (uint32_t)((t2 - t1) / 1000);
+		runtime += uint32_t(timer.ElapseUs());
 		return true;
 	}
 };

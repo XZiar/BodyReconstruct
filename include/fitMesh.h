@@ -40,6 +40,7 @@ struct CScan : public CBaseModel
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     //cv::flann::Index *kdtree;
+	miniBLAS::VertexIVec vColors;
 	miniBLAS::h3NNTree nntree;
 
 	void prepare();
@@ -182,11 +183,14 @@ private:
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/
 	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr);
+	void showColorResult(const CScan& scan, const bool showScan = true);
 
 	std::string buildName(const uint32_t frame);
 	void saveMParam(const std::string& fname);
 	void showFrame(const uint32_t frame);
+
 	void printFrame(const uint32_t frame);
+	void setTitle(const std::string& title);
 };
 
 #endif // FITMESH_H

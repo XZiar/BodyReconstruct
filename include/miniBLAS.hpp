@@ -194,6 +194,15 @@ protected:
 	Vec4Base(const T x_, const T y_) :x(x_), y(y_) { };
 	Vec4Base(const T x_, const T y_, const T z_) :x(x_), y(y_), z(z_) { };
 	Vec4Base(const T x_, const T y_, const T z_, const T w_) :x(x_), y(y_), z(z_), w(w_) { };
+
+public:
+	template<uint8_t N, typename T2>
+	void save(T2 *__restrict ptr) const
+	{
+		static_assert(N <= 4, "there is only 4 elements");
+		for (uint8_t a = 0; a < N; ++a)
+			ptr[a] = data[4];
+	};
 };
 
 
@@ -386,6 +395,7 @@ public:
 		int_dat = _mm_loadu_si128((__m128i*)ptr);
 	};
 };
+using VertexIVec = std::vector<miniBLAS::VertexI, AlignAllocator<miniBLAS::VertexI>>;
 
 
 static const uint32_t SQMat4Align = 32;

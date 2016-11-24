@@ -39,3 +39,16 @@ void sleepMS(uint32_t ms);
 bool yesORno(const char *str, const bool expect = true);
 int inputNumber(const char *str, const int32_t expect);
 extern bool isVtune;
+
+struct SimpleTimer
+{
+private:
+	uint64_t t1, t2;
+public:
+	SimpleTimer() { t2 = Start(); };
+	uint64_t Start() { return t1 = getCurTimeNS(); };
+	uint64_t Stop() { return t2 = getCurTimeNS(); };
+	uint64_t ElapseNs() { return t2 - t1; };
+	uint64_t ElapseUs() { return ElapseNs() / 1000; };
+	uint64_t ElapseMs() { return ElapseNs() / 1000000; };
+};
