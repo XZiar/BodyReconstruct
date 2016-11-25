@@ -23,12 +23,13 @@ using ceres::Solver;
 using miniBLAS::Vertex;
 using miniBLAS::VertexI;
 using miniBLAS::VertexVec;
+using miniBLAS::VertexIVec;
 
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
 
-bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const miniBLAS::VertexI& idx, const float dist) const
+bool FastTriangle::intersect(const Vertex& origin, const Vertex& direction, const VertexI& idx, const float dist) const
 {
 	if (_mm_movemask_epi8(_mm_cmpeq_epi32(idx, pidx)) != 0)//point is one ertex of the triangle
 		return false;
@@ -59,6 +60,34 @@ bool FastTriangle::intersect(const miniBLAS::Vertex& origin, const miniBLAS::Ver
 		return true;
 	else
 		return false;
+}
+
+
+void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud) const
+{
+	for (uint32_t i = 0; i < nPoints; ++i)
+	{
+		const auto& pt = vPts[i];
+		const auto& clr = vColors[i];
+		pcl::PointXYZRGB obj(clr.x, clr.y, clr.z);
+		obj.x = pt.x; obj.y = pt.y; obj.z = pt.z;
+		cloud->push_back(obj);
+	}
+}
+
+void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud, pcl::PointXYZRGB color, const bool isCalcNorm) const
+{
+	for (uint32_t i = 0; i < nPoints; ++i)
+	{
+		const Vertex& pt = vPts[i];
+		if (isCalcNorm)
+		{
+			const auto y = vNorms[i].y;
+			color.b = (uint8_t)(y * 32 + (y > 0 ? 255 - 32 : 32));
+		}
+		color.x = pt.x; color.y = pt.y; color.z = pt.z;
+		cloud->push_back(color);
+	}
 }
 
 
@@ -247,27 +276,6 @@ static void printArray(const char* str, const double(&array)[N])
 	printf("\n");
 }
 
-static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const VertexVec& model, pcl::PointXYZRGB color)
-{
-	for (uint32_t i = 0; i < model.size(); ++i)
-	{
-		const Vertex& pt = model[i];
-		color.x = pt.x; color.y = pt.y; color.z = pt.z;
-		cloud->push_back(color);
-	}
-}
-static void showPoints(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const VertexVec& model, const VertexVec& norm, pcl::PointXYZRGB color)
-{
-	const uint32_t cnt = std::min(model.size(), norm.size());
-	for (uint32_t i = 0; i < cnt; ++i)
-	{
-		const Vertex& pt = model[i];
-		const auto y = norm[i].y;
-		color.b = (uint8_t)(y * 32 + (y > 0 ? 255 - 32 : 32));
-		color.x = pt.x; color.y = pt.y; color.z = pt.z;
-		cloud->push_back(color);
-	}
-}
 /*
 static cv::Mat armaTOcv(const arma::mat in)
 {
@@ -376,7 +384,7 @@ bool fitMesh::loadScan(CScan& scan)
 	for (uint32_t a = 0; a < scan.nPoints; ++a)
 	{
 		const PointT& pt = cloud_tmp->points[a];
-		scan.vColors.push_back(VertexI(pt.r, pt.b, pt.b));
+		scan.vColors.push_back(Vertex(pt.r, pt.b, pt.b));
 	}
 	//normalize the normals
 	scan.normals_orig = arma::normalise(scan.normals_orig, 2, 1);
@@ -925,7 +933,7 @@ void fitMesh::raytraceCut(miniBLAS::NNResult& res) const
 	for (uint32_t idx = 0; idx < tempbody.nPoints; ++idx)
 	{
 		const auto& p = tempbody.vPts[idx];
-		const miniBLAS::VertexI vidx(idx, idx, idx, idx);
+		const VertexI vidx(idx, idx, idx, idx);
 		Vertex dir = p - camPos;
 		const float dist = dir.length();
 		dir /= dist;
@@ -1014,7 +1022,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 			}
 		}
 		err = distAll;
-		printf("valid nn number: %d , total error: %f\n", sumVNN, err);
+		logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, err);
 	}
 
 	FILE *fp = fopen("output.data", "wb");
@@ -1070,7 +1078,56 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 	isValidNN_rtn = isValidNN;
 	return sumVNN;
 }
-void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<uint32_t>* const idxs)
+
+void fitMesh::buildModelColor()
+{
+	if (!yesORno("build color for model from current scans?"))
+		tempbody.vColors = VertexVec(tempbody.nPoints, Vertex(0, 192, 0));
+	else
+	{
+		tempbody.vColors.resize(tempbody.nPoints);
+		memset(&tempbody.vColors[0], 0x0, sizeof(Vertex) * tempbody.nPoints);
+		vector<float> times(tempbody.nPoints, 0);
+		for (uint32_t a = 0; a <= curFrame; ++a)
+		{
+			printf("calculating frame %d\n", a);
+			const auto& mp = modelParams[a];
+			auto& scan = scanFrames[a];
+			scan.nntree.MAXDist2 = 5e3f;
+			tempbody.updPoints(shapepose.getModelFast(mp.shape, mp.pose));
+			tempbody.calcFaces();
+			tempbody.calcNormals();
+
+			miniBLAS::NNResult nnres(tempbody.nPoints, scan.nntree.PTCount());
+			scan.nntree.searchOnAnglePan(nnres, tempbody.vPts, tempbody.vNorms, angleLimit, angleLimit / 2);
+			{
+				const float mincos = cos(3.1415926 * angleLimit / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+				for (uint32_t i = 0; i < tempbody.nPoints; i++)
+				{
+					const auto idx = nnres.idxs[i];
+					if (idx > 65530)//unavailable already
+						continue;
+					if (nnres.mthcnts[idx] > 3)//consider cut some link
+						if (nnres.mdists[idx] < nnres.dists[i])//not mininum
+							continue;
+					const auto thecos = scan.vNorms[idx] % tempbody.vNorms[i];
+					if (thecos >= mincos)//satisfy angle limit
+					{
+						const float wgt = thecos > limcos ? 1 : thecos * cosInv;
+						const auto& src = scan.vColors[idx];
+						tempbody.vColors[i] += Vertex(src.x, src.y, src.z)*wgt;
+						times[i] += wgt;
+					}
+				}
+			}
+			//end of each frame
+		}
+		for (uint32_t i = 0; i < tempbody.nPoints; i++)
+			tempbody.vColors[i] /= times[i];
+	}
+}
+
+void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<uint32_t>* const idxs) const
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 	if (idxs != nullptr)
@@ -1093,29 +1150,10 @@ void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<ui
     }
     else
     {
-		//show scan points
 		if (showScan)
-			showPoints(cloud, scan.vPts, scan.vNorms, pcl::PointXYZRGB(192, 0, 0));
-		//show templete points
-		showPoints(cloud, tempbody.vPts, tempbody.vNorms, pcl::PointXYZRGB(0, 192, 0));
+			scan.ShowPC(cloud, pcl::PointXYZRGB(192, 0, 0));
+		tempbody.ShowPC(cloud, pcl::PointXYZRGB(0, 192, 0));
     }
-	viewer.showCloud(cloud);
-}
-void fitMesh::showColorResult(const CScan& scan, const bool showScan)
-{
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-	if (showScan)
-	{
-		for (uint32_t i = 0; i < scan.nPoints; ++i)
-		{
-			const Vertex& pt = scan.vPts[i];
-			const VertexI& clr = scan.vColors[i];
-			pcl::PointXYZRGB obj(clr.x, clr.y, clr.z);
-			obj.x = pt.x; obj.y = pt.y; obj.z = pt.z;
-			cloud->push_back(obj);
-		}
-	}
-	showPoints(cloud, tempbody.vPts, pcl::PointXYZRGB(0, 192, 0));
 	viewer.showCloud(cloud);
 }
 
@@ -1141,9 +1179,7 @@ void fitMesh::mainProcess()
 		{// draw camara
 			pcl::ModelCoefficients coef;
 			coef.values.resize(4);
-			coef.values[0] = camPos.x;
-			coef.values[1] = camPos.y;
-			coef.values[2] = camPos.z;
+			camPos.save<3>(&coef.values[0]);
 			coef.values[3] = 30;
 			viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
 			{
@@ -1318,9 +1354,13 @@ void fitMesh::watch(const uint32_t frameCount)
 
 void fitMesh::watch()
 {
+	buildModelColor();
 	viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
 	{
-		v.setBackgroundColor(0.25, 0.25, 0.25);
+		v.setBackgroundColor(0.25, 0.25, 0.25); 
+		//pcl::PolygonMesh pm;
+		//pm.cloud = 
+		//v.addPolygonMesh(pm);
 	});
 	setTitle("Watching Mode");
 	isEnd = false; isAnimate = false; isShowScan = true;
@@ -1369,6 +1409,7 @@ void fitMesh::watch()
 			showFrame(curFrame);
 			sleepMS(18);
 			lastFrame = curFrame;
+			lastShowScan = isShowScan;
 		}
 		else
 		{
@@ -1401,5 +1442,10 @@ void fitMesh::showFrame(const uint32_t frame)
 	tempbody.calcFaces();
 	tempbody.calcNormals();
 	printFrame(frame);
-	showColorResult(scanFrames[frame], isShowScan);
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+	if (isShowScan)
+		scanFrames[frame].ShowPC(cloud);
+	tempbody.ShowPC(cloud);
+	viewer.showCloud(cloud);
 }
+

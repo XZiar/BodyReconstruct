@@ -197,11 +197,11 @@ protected:
 
 public:
 	template<uint8_t N, typename T2>
-	void save(T2 *__restrict ptr) const
+	void save(T2 *ptr) const
 	{
 		static_assert(N <= 4, "there is only 4 elements");
 		for (uint8_t a = 0; a < N; ++a)
-			ptr[a] = data[4];
+			ptr[a] = data[a];
 	};
 };
 

@@ -21,14 +21,17 @@ ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
 	bool intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const miniBLAS::VertexI& idx, const float dist) const;
 };
 
-struct CBaseModel
+struct ModelBase
 {
 	miniBLAS::VertexVec vPts;
 	miniBLAS::VertexVec vNorms;
+	miniBLAS::VertexVec vColors; 
 	uint32_t nPoints;
+	void ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud) const;
+	void ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud, pcl::PointXYZRGB color, const bool isCalcNorm = true) const;
 };
 
-struct CScan : public CBaseModel
+struct CScan : public ModelBase
 {
 	arma::mat points_orig;
 	arma::mat normals_orig;
@@ -40,13 +43,12 @@ struct CScan : public CBaseModel
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     //cv::flann::Index *kdtree;
-	miniBLAS::VertexIVec vColors;
 	miniBLAS::h3NNTree nntree;
 
 	void prepare();
 };
 
-struct CTemplate : public CBaseModel
+struct CTemplate : public ModelBase
 {
     arma::mat points;
     arma::mat faces;
@@ -111,8 +113,8 @@ public:
 	std::vector<CScan> scanFrames;
 	std::vector<ModelParam> modelParams;
 
-	uint32_t curFrame = 0;
-	std::atomic_bool isEnd, isAnimate, isShowScan = true;
+	volatile uint32_t curFrame = 0;
+	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true;
 	SimpleLog logger;
 
 	bool isFastCost = false;
@@ -134,7 +136,7 @@ public:
 public:
 	fitMesh(std::string dir);
 	~fitMesh();
-	void loadLandmarks();
+	
 	void init(const std::string& baseName, const bool isOnce);
 	//The main process of the fitting procedue
 	void mainProcess();
@@ -152,6 +154,7 @@ private:
 	PtrModSmooth msmooth;
 
 	void loadTemplate();
+	void loadLandmarks();
 	void loadModel();
 	bool loadScan(CScan& scan);
 	void rigidAlignTemplate2ScanPCA(CScan& scanbody);
@@ -160,6 +163,7 @@ private:
 		std::vector<double>& widAvg, std::vector<double>& depAvg, std::vector<double>& depMax);
 	void DirectRigidAlign(CScan& scan);
 	void rigidAlignTemplate2ScanLandmarks();
+
 	/** @brief fitShapePose
 	 ** Fit the model to the scan by pose & shape
 	 ** @param -paramer  a function to determine solve params by iteration
@@ -173,22 +177,24 @@ private:
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
 	void solveAllShape(const double angLim, const ceres::Solver::Options& options);
 	
+	void buildModelColor();
+
 	/** @brief nnFilter
 	 ** @param -angLim  max angle(in degree) between two norms
 	 **/
 	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
+
 	uint32_t updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/
-	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr);
-	void showColorResult(const CScan& scan, const bool showScan = true);
-
-	std::string buildName(const uint32_t frame);
+	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr) const;
+	
 	void saveMParam(const std::string& fname);
 	void showFrame(const uint32_t frame);
 
+	std::string buildName(const uint32_t frame);
 	void printFrame(const uint32_t frame);
 	void setTitle(const std::string& title);
 };
