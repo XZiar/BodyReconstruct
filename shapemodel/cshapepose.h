@@ -14,7 +14,7 @@ private:
 		const uint32_t numEigenVectors, double* pointsOut, double* jointsOut);
 
 public:
-	CShapePose();
+	CShapePose(const std::string& modelFileName);
 	PtrModSmooth preCompute(const char *__restrict validMask) { return initMesh_bk.preCompute(validMask); };
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn) const;
 	CMesh getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask) const;

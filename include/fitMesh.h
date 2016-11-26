@@ -27,8 +27,8 @@ struct ModelBase
 	miniBLAS::VertexVec vNorms;
 	miniBLAS::VertexVec vColors; 
 	uint32_t nPoints;
-	void ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud) const;
-	void ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud, pcl::PointXYZRGB color, const bool isCalcNorm = true) const;
+	void ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud) const;
+	void ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud, pcl::PointXYZRGB color, const bool isCalcNorm = true) const;
 };
 
 struct CScan : public ModelBase
@@ -64,6 +64,7 @@ struct CTemplate : public ModelBase
 	void updPoints(miniBLAS::VertexVec&& pts);
 	void calcFaces();
 	void calcNormals();
+	std::vector<pcl::Vertices> ShowMesh(pcl::PointCloud<pcl::PointXYZRGB>& cloud);
 };
 
 struct ModelParam
@@ -107,14 +108,15 @@ public:
 class fitMesh
 {
 public:
-	static CTemplate tempbody;
-	static CShapePose shapepose;
+	static pcl::visualization::CloudViewer viewer;
 	static ctools tools;
+	CShapePose shapepose;
+	CTemplate tempbody;
 	std::vector<CScan> scanFrames;
 	std::vector<ModelParam> modelParams;
 
 	volatile uint32_t curFrame = 0;
-	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true;
+	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true, isRefresh = true;
 	SimpleLog logger;
 
 	bool isFastCost = false;
@@ -122,19 +124,11 @@ public:
 	bool isAngWgt = false;
 	bool isShFix = true;
 	//bool useFLANN = false;
-    int angleLimit;
-	double scale;
-	arColIS isValidNN_;
-	std::vector<float> weights;
-	double tSPose = 0, tSShape = 0, tMatchNN = 0;
-	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
-
 	uint32_t nSamplePoints;
-    arma::mat evectors;//the eigen vetors of the body shape model
-    arma::mat evalues;
+    int angleLimit;
     std::string dataDir;
 public:
-	fitMesh(std::string dir);
+	fitMesh(const std::string& dir);
 	~fitMesh();
 	
 	void init(const std::string& baseName, const bool isOnce);
@@ -144,8 +138,16 @@ public:
 	void watch();
 	void watch(const uint32_t frameCount);
 private:
+	double scale;
+	arColIS isValidNN_;
+	std::vector<float> weights;
+	double tSPose = 0, tSShape = 0, tMatchNN = 0;
+	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
+
 	std::string baseFName;
 	bool mode = true;//true: one scan, false:scan sequence
+	enum ShowMode : uint8_t { None, PointCloud, ColorCloud, Mesh };
+	ShowMode showTMode = ColorCloud;
 	miniBLAS::Vertex camPos;
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;

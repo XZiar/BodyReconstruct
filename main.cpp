@@ -2,6 +2,18 @@
 #include "fitMesh.h"
 
 using std::string;
+
+
+uint64_t hash_(const string& str)
+{
+	uint64_t hash = 0;
+	for (size_t a = 0; a < str.length(); ++a)
+		hash = hash * 33 + str[a];
+	return hash;
+}
+
+
+
 uint64_t getCurTime()
 {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();

@@ -32,7 +32,6 @@ constexpr uint32_t POSPARAM_NUM = 31;
 constexpr uint32_t SHAPEPARAM_NUM = 20;
 constexpr uint32_t EVALUATE_POINTS_NUM = 6449;
 
-
 uint64_t getCurTime();
 uint64_t getCurTimeNS();
 void sleepMS(uint32_t ms);
@@ -52,3 +51,20 @@ public:
 	uint64_t ElapseUs() { return ElapseNs() / 1000; };
 	uint64_t ElapseMs() { return ElapseNs() / 1000000; };
 };
+
+/** @brief calculate simple hash for string, used for switch-string
+ ** @param str std-string for the text
+ ** @return uint64_t the hash
+ **/
+uint64_t hash_(const std::string& str);
+constexpr uint64_t hash_(const char *str, const uint64_t last)
+{
+	return *str ? hash_(str + 1, *str + last * 33) : last;
+}
+/** @brief calculate simple hash for string, used for switch-string
+ ** @return uint64_t the hash
+ **/
+constexpr uint64_t operator "" _hash(const char *str, size_t)
+{
+	return hash_(str, 0);
+}

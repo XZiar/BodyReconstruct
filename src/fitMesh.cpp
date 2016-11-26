@@ -31,7 +31,7 @@ using PointCloudT = pcl::PointCloud<PointT>;
 
 bool FastTriangle::intersect(const Vertex& origin, const Vertex& direction, const VertexI& idx, const float dist) const
 {
-	if (_mm_movemask_epi8(_mm_cmpeq_epi32(idx, pidx)) != 0)//point is one ertex of the triangle
+	if (_mm_movemask_epi8(_mm_cmpeq_epi32(idx, pidx)) != 0)//point is one vertex of the triangle
 		return false;
 	/*
 	** Point(u,v) = (1-u-v)*p0 + u*p1 + v*p2
@@ -63,7 +63,7 @@ bool FastTriangle::intersect(const Vertex& origin, const Vertex& direction, cons
 }
 
 
-void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud) const
+void ModelBase::ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud) const
 {
 	for (uint32_t i = 0; i < nPoints; ++i)
 	{
@@ -71,11 +71,11 @@ void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr& cloud) cons
 		const auto& clr = vColors[i];
 		pcl::PointXYZRGB obj(clr.x, clr.y, clr.z);
 		obj.x = pt.x; obj.y = pt.y; obj.z = pt.z;
-		cloud->push_back(obj);
+		cloud.push_back(obj);
 	}
 }
 
-void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud, pcl::PointXYZRGB color, const bool isCalcNorm) const
+void ModelBase::ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud, pcl::PointXYZRGB color, const bool isCalcNorm) const
 {
 	for (uint32_t i = 0; i < nPoints; ++i)
 	{
@@ -86,7 +86,7 @@ void ModelBase::ShowPC(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud, pcl
 			color.b = (uint8_t)(y * 32 + (y > 0 ? 255 - 32 : 32));
 		}
 		color.x = pt.x; color.y = pt.y; color.z = pt.z;
-		cloud->push_back(color);
+		cloud.push_back(color);
 	}
 }
 
@@ -171,6 +171,20 @@ void CTemplate::calcNormals()
 		vNorms[i] = vFaces[faceMap[i]].norm;
 }
 
+vector<pcl::Vertices> CTemplate::ShowMesh(pcl::PointCloud<pcl::PointXYZRGB>& cloud)
+{
+	ShowPC(cloud);
+	vector<pcl::Vertices> vts;
+	pcl::Vertices vt;
+	vt.vertices.resize(3);
+	for (const auto& f : vFaces)
+	{
+		f.pidx.save<3>(&vt.vertices[0]);
+		vts.push_back(vt);
+	}
+	return vts;
+}
+
 
 SimpleLog::SimpleLog()
 {
@@ -248,8 +262,6 @@ static VertexVec shuffleANDfilter(const VertexVec& in, const uint32_t cnt, const
 	return cache;
 }
 
-static pcl::visualization::CloudViewer viewer("viewer");
-
 void printMat(const char * str, arma::mat v)
 {
     printf("%s: ",str);
@@ -295,25 +307,14 @@ static cv::Mat armaTOcv(const arma::mat in)
     return out;
 }
 */
-static void saveMat(const char* fname, const arma::mat& m)
-{
-	FILE *fp = fopen(fname, "w");
-	m.each_row([&](const arma::rowvec& row)
-	{
-		double x = row(0), y = row(1), z = row(2), s = x*x + y*y + z*z;
-		fprintf(fp, "%8.6f %8.6f %8.6f = %8.6f\n", x, y, z, s);
-	});
-	fclose(fp);
-}
 
-CShapePose fitMesh::shapepose;
-CTemplate fitMesh::tempbody;
+
 ctools fitMesh::tools;
+pcl::visualization::CloudViewer fitMesh::viewer("viewer");
 
-fitMesh::fitMesh(std::string dir)
+fitMesh::fitMesh(const std::string& dir) : dataDir(dir), shapepose(dir + "model.dat")
 {
     nSamplePoints = 60000;
-	dataDir = dir;
 	loadModel();
 	loadTemplate();
 }
@@ -443,14 +444,15 @@ void fitMesh::loadTemplate()
   */
 void fitMesh::loadModel()
 {
-    //cout<<"loading eigen vectors...\n";
+	//the eigen vetors of the body shape model
+	arma::mat evectors, evalues;
+
 	evectors.load(dataDir + "reduced_evectors.mat");
 	cout << "eigen vectors loaded: " << evectors.n_rows << "," << evectors.n_cols << endl;
-
-    //cout<<"loading eigen values...\n";
 	evalues.load(dataDir + "evalues.mat");
 	evalues = evalues.cols(0, SHAPEPARAM_NUM - 1);
 	cout << "eigen values loaded: " << evalues.n_rows << "," << evalues.n_cols << endl;
+
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
 }
@@ -488,7 +490,6 @@ arma::vec fitMesh::searchShoulder(const arma::mat& model, const uint32_t level, 
 
 arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, double& dDepth)
 {
-	//res = {tObjHei, tAvgDep[a], sAvgDep[a]/sST, tMaxDep[a], sMaxDep[a]/sST};
 	arma::vec res(5, arma::fill::ones);
     {
         const uint32_t lv = 64;
@@ -515,7 +516,8 @@ arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, dou
             }
         }
     }
-    dDepth += (res(3) - res(4))/2;
+	//res = {tObjHei, tAvgDep[a], sAvgDep[a]/sST, tMaxDep[a], sMaxDep[a]/sST};
+	dDepth += (res(3) - res(4)) / 2;
     double tanOri = res(2) / res(0), tanObj = (res(1) + res(3) - res(4)) / res(0);
 
     double cosx = (1 + tanOri*tanObj)/( sqrt(1+tanOri*tanOri) * sqrt(1+tanObj*tanObj) );
@@ -754,7 +756,7 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 	options.linear_solver_type = ceres::DENSE_QR;
 	options.num_threads = 2;
     options.num_linear_solver_threads = 2;
-    options.minimizer_progress_to_stdout = true;
+    options.minimizer_progress_to_stdout = false;
     Solver::Summary summary;
     
 	cout << "solving...\n";
@@ -805,7 +807,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	options.linear_solver_type = ceres::DENSE_QR;
 	options.num_threads = 2;
 	options.num_linear_solver_threads = 2;
-    options.minimizer_progress_to_stdout = true;
+    options.minimizer_progress_to_stdout = false;
     Solver::Summary summary;
 
 	cout << "solving...\n";
@@ -1081,7 +1083,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 
 void fitMesh::buildModelColor()
 {
-	if (!yesORno("build color for model from current scans?"))
+	if (!yesORno("\nbuild color for model from current scans?"))
 		tempbody.vColors = VertexVec(tempbody.nPoints, Vertex(0, 192, 0));
 	else
 	{
@@ -1090,15 +1092,15 @@ void fitMesh::buildModelColor()
 		vector<float> times(tempbody.nPoints, 0);
 		for (uint32_t a = 0; a <= curFrame; ++a)
 		{
-			printf("calculating frame %d\n", a);
+			printf("calculating frame %d...", a);
 			const auto& mp = modelParams[a];
 			auto& scan = scanFrames[a];
-			scan.nntree.MAXDist2 = 5e3f;
 			tempbody.updPoints(shapepose.getModelFast(mp.shape, mp.pose));
 			tempbody.calcFaces();
 			tempbody.calcNormals();
 
 			miniBLAS::NNResult nnres(tempbody.nPoints, scan.nntree.PTCount());
+			scan.nntree.MAXDist2 = 1e3f;
 			scan.nntree.searchOnAnglePan(nnres, tempbody.vPts, tempbody.vNorms, angleLimit, angleLimit / 2);
 			{
 				const float mincos = cos(3.1415926 * angleLimit / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
@@ -1121,6 +1123,7 @@ void fitMesh::buildModelColor()
 				}
 			}
 			//end of each frame
+			printf("ok.\n");
 		}
 		for (uint32_t i = 0; i < tempbody.nPoints; i++)
 			tempbody.vColors[i] /= times[i];
@@ -1151,8 +1154,8 @@ void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<ui
     else
     {
 		if (showScan)
-			scan.ShowPC(cloud, pcl::PointXYZRGB(192, 0, 0));
-		tempbody.ShowPC(cloud, pcl::PointXYZRGB(0, 192, 0));
+			scan.ShowPC(*cloud, pcl::PointXYZRGB(192, 0, 0));
+		tempbody.ShowPC(*cloud, pcl::PointXYZRGB(0, 192, 0));
     }
 	viewer.showCloud(cloud);
 }
@@ -1358,9 +1361,6 @@ void fitMesh::watch()
 	viewer.runOnVisualizationThreadOnce([=](pcl::visualization::PCLVisualizer& v)
 	{
 		v.setBackgroundColor(0.25, 0.25, 0.25); 
-		//pcl::PolygonMesh pm;
-		//pm.cloud = 
-		//v.addPolygonMesh(pm);
 	});
 	setTitle("Watching Mode");
 	isEnd = false; isAnimate = false; isShowScan = true;
@@ -1371,6 +1371,7 @@ void fitMesh::watch()
 	printf("L/R    -previous/next frame\n");
 	printf("\n");
 	curFrame = 0;
+
 	auto keyreg = viewer.registerKeyboardCallback([](const pcl::visualization::KeyboardEvent& event, void* pthis) 
 	{
 		fitMesh& cthis = *(fitMesh*)pthis;
@@ -1383,38 +1384,48 @@ void fitMesh::watch()
 				if (event.getKeySym() == "Left")
 					f = std::max(f - 1, 0);
 				else if (event.getKeySym() == "Right")
-					f = std::min(int32_t(cthis.scanFrames.size() - 1), f + 1);
+					f = std::min(int32_t(cthis.scanFrames.size()), f + 1);
+				if(cthis.curFrame != f)
+					cthis.isRefresh = true;
 				cthis.curFrame = f;
 			}
-			if (event.getKeySym() == "Escape")
-				cthis.isEnd = true;
-			else if (event.getKeySym() == "space")
+			switch (hash_(event.getKeySym()))
+			{
+			case "Escape"_hash :
+				cthis.isEnd = true; break;
+			case "space"_hash:
 				cthis.isAnimate = !cthis.isAnimate;
-			else if (event.getKeySym() == "Return")
+				cthis.isRefresh = true; break;
+			case "Return"_hash:
 				cthis.isShowScan = !cthis.isShowScan;
+				cthis.isRefresh = true; break;
+			case "Up"_hash:
+				cthis.showTMode = ShowMode((uint8_t(cthis.showTMode) + 1) % 4);
+				cthis.isRefresh = true; break;
+			case "Down"_hash:
+				cthis.showTMode = ShowMode((uint8_t(cthis.showTMode) + 3) % 4);
+				cthis.isRefresh = true; break;
+			}
 		}
 	}, this);
 
 	bool gap = true;
-	uint32_t lastFrame = 255; bool lastShowScan = isShowScan;
 	while (!isEnd)
 	{
 		if (isAnimate && gap)
 		{
 			curFrame = (curFrame + 1) % scanFrames.size();
+			isRefresh = true;
 		}
 		gap = !gap;
-		if (lastFrame != curFrame || lastShowScan != isShowScan)
+		if (isRefresh)
 		{
+			isRefresh = false;
 			showFrame(curFrame);
 			sleepMS(18);
-			lastFrame = curFrame;
-			lastShowScan = isShowScan;
 		}
 		else
-		{
 			sleepMS(20);
-		}
 	}
 	keyreg.disconnect();
 	return;
@@ -1444,8 +1455,36 @@ void fitMesh::showFrame(const uint32_t frame)
 	printFrame(frame);
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 	if (isShowScan)
-		scanFrames[frame].ShowPC(cloud);
-	tempbody.ShowPC(cloud);
+		scanFrames[frame].ShowPC(*cloud);
+	switch (showTMode)
+	{
+	case PointCloud:
+		tempbody.ShowPC(*cloud, pcl::PointXYZRGB(0, 192, 0));
+		break;
+	case ColorCloud:
+		tempbody.ShowPC(*cloud);
+		break;
+	case Mesh:
+		viewer.runOnVisualizationThreadOnce([&](pcl::visualization::PCLVisualizer& v)
+		{
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cld(new pcl::PointCloud<pcl::PointXYZRGB>);
+			auto vts = tempbody.ShowMesh(*cld);
+			if (v.contains("tpbody"))
+				v.updatePolygonMesh<pcl::PointXYZRGB>(cld, vts, "tpbody");
+			else
+				v.addPolygonMesh<pcl::PointXYZRGB>(cld, vts, "tpbody");
+		});
+		break;
+	case None:
+	default:
+		break;
+	}
+	if(showTMode != Mesh)
+		viewer.runOnVisualizationThreadOnce([&](pcl::visualization::PCLVisualizer& v)
+	{
+		if (v.contains("tpbody"))
+			v.removePolygonMesh("tpbody");
+	});
 	viewer.showCloud(cloud);
 }
 

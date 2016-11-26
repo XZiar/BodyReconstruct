@@ -12,10 +12,9 @@ using miniBLAS::Vertex;
 using miniBLAS::VertexVec;
 using miniBLAS::SQMat4x4;
 
-CShapePose::CShapePose()
+CShapePose::CShapePose(const string& modelFileName)
 {
-	auto aModelFile = "../BodyReconstruct/data/model.dat";
-	initMesh_bk.readModel(aModelFile, true);
+	initMesh_bk.readModel(modelFileName.c_str(), true);
 	initMesh_bk.updateJntPos();
 	initMesh_bk.centerModel();
 	initMesh_bk.prepareData();

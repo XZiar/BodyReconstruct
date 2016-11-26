@@ -31,6 +31,10 @@
 
 #pragma comment(lib, R"(opengl32.lib)")
 //#pragma comment(lib, R"(ippicvmt.lib)")
+#pragma comment(lib, R"(vtk\vtkCommonCore-7.0.lib)")
+#pragma comment(lib, R"(vtk\vtkCommonDataModel-7.0.lib)")
+#pragma comment(lib, R"(vtk\vtkCommonMath-7.0.lib)")
+#pragma comment(lib, R"(vtk\vtkRenderingCore-7.0.lib)")
 #pragma comment(lib, R"(pcl\pcl_common_release.lib)")
 #pragma comment(lib, R"(pcl\pcl_io_ply_release.lib)")
 #pragma comment(lib, R"(pcl\pcl_io_release.lib)")
