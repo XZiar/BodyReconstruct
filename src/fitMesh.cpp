@@ -651,7 +651,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 	*/
 	bool solvedS = false, solvedP = false;
 	vector<uint32_t> idxMapper(tempbody.nPoints);
-	tmpMParam = bakMParam = curMParam;
+	predMParam = bakMParam = curMParam;
 	//Optimization Loop
 	for (uint32_t a = 0; a < iter; ++a)
 	{
@@ -669,10 +669,10 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 			solvePose(scanCache, isValidNN_, err, a);
 			//copy first correction of base 6 param
 			for (uint32_t b = 0; b < 6; ++b)
-				tmpMParam.pose[b] = curMParam.pose[b];
+				predMParam.pose[b] = curMParam.pose[b];
 			//reset bone angle to stay fixed with last frame but allow some changes
 			for (uint32_t b = 6; b < POSPARAM_NUM; ++b)
-				tmpMParam.pose[b] = (bakMParam.pose[b] * 4 + curMParam.pose[b]) / 5;
+				predMParam.pose[b] = (bakMParam.pose[b] * 4 + curMParam.pose[b]) / 5;
 		}
 		if (std::get<2>(param))
 		{
@@ -686,7 +686,7 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 			}
 			//copy first correction of base 6 param
 			for (uint32_t b = 0; b < 6; ++b)
-				tmpMParam.setShape(curMParam.shape);
+				predMParam.setShape(curMParam.shape);
 		}
 		cout << "========================================\n";
 		printArray("pose param", curMParam.pose);
@@ -719,8 +719,8 @@ void fitMesh::solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isV
 		problem.AddResidualBlock(cost_functionMulti, NULL, pose);
 		*/
 		auto *cost_functionMulti = new ceres::NumericDiffCostFunction<PoseCostFunctorPred_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(isAngWgt ? new PoseCostFunctorPred_D(&shapepose, curMParam, tmpMParam, isValidNN, scanCache, weights) :
-				new PoseCostFunctorPred_D(&shapepose, curMParam, tmpMParam, isValidNN, scanCache));
+			(isAngWgt ? new PoseCostFunctorPred_D(&shapepose, curMParam, predMParam, isValidNN, scanCache, weights) :
+				new PoseCostFunctorPred_D(&shapepose, curMParam, predMParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionMulti, NULL, pose);
 	}
 	else if (isFastCost)
@@ -821,7 +821,7 @@ void fitMesh::solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& is
 	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
-void fitMesh::fitFinalShape(const uint32_t iter)
+void fitMesh::fitFinalShape(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer)
 {
 	isFastCost = true;
 	double err = 0;
@@ -830,7 +830,6 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 	cSPose = cSShape = cMatchNN = 0;
 
 	bool solvedS = false, solvedP = false;
-	vector<uint32_t> idxMapper(tempbody.nPoints);
 
 	Solver::Options options;
 	options.minimizer_type = ceres::TRUST_REGION;
@@ -840,31 +839,61 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 	options.num_linear_solver_threads = 2;
 	options.minimizer_progress_to_stdout = true;
 
-	//Optimization Loop
-	for (uint32_t a = 0; a < iter / 2; ++a)
+	for (auto& sc : scanFrames)
+		sc.nntree.MAXDist2 = 3e3f;
+	tempbody.nntree.MAXDist2 = 3e3f;
+	const bool isFitRe = yesORno("use reverse-match t solve shape?");
+
+	for (uint32_t a = 0; a < iter; ++a)
 	{
-		solveAllShape(angleLimit*1.2, options);
-		printArray("\nshape param", curMParam.shape);
-		cout << "========================================\n";
+		const auto& pret = paramer(a, iter, angleLimit);
+		const auto angle = std::get<0>(pret);
+		if (std::get<1>(pret))//solveshape
+		{
+			if (isFitRe)
+				solveAllShapeRe(angle, options);
+			else
+				solveAllShape(angle, options);
+			printArray("\nshape param", curMParam.shape);
+			cout << "========================================\n";
+		}
+		else//solvepose
+		{
+			solveAllPose(angle, std::get<2>(pret), options);
+		}
 	}
-	bakMParam = curMParam;
+
+	vector<uint32_t> idxMapper(tempbody.nPoints);
+	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
+	showResult(scanFrames.back());
+	//wait until the window is closed
+	cout << "optimization finished\n";
+	logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+}
+void fitMesh::solveAllPose(const double angLim, const bool dopred, const Solver::Options& options)
+{
+	double err = 0;
+	uint32_t sumVNN;
 	for (curFrame = 0; curFrame < modelParams.size(); ++curFrame)
 	{
 		printFrame(curFrame);
 		curMParam.setPose(modelParams[curFrame].pose);
-		if (curFrame == 0 || curFrame == modelParams.size() - 1)
-			tmpMParam.setPose(curMParam.pose);
-		else
+		if (dopred && curFrame > 0 && curFrame < modelParams.size())
 		{
 			const auto& prev = modelParams[curFrame - 1], &next = modelParams[curFrame + 1];
 			for (uint32_t b = 0; b < POSPARAM_NUM; ++b)
-				tmpMParam.pose[b] = curMParam.pose[b];
+				predMParam.pose[b] = curMParam.pose[b];
 			for (uint32_t b = 6; b < POSPARAM_NUM; ++b)
-				tmpMParam.pose[b] = (prev.pose[b] * 0.2 + next.pose[b] * 0.2 + curMParam.pose[b]) / 1.4;
+				predMParam.pose[b] = (prev.pose[b] * 0.2 + next.pose[b] * 0.2 + curMParam.pose[b]) / 1.4;
 		}
+		else
+			predMParam.setPose(curMParam.pose);
 
 		const auto& curScan = scanFrames[curFrame];
-		sumVNN = updatePoints(curScan, curMParam, angleLimit, idxMapper, isValidNN_, err);
+		vector<uint32_t> idxMapper(tempbody.nPoints);
+		sumVNN = updatePoints(curScan, curMParam, angLim, idxMapper, isValidNN_, err);
 		showResult(curScan);
 
 		const auto scanCache = shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.memptr() : nullptr);
@@ -874,21 +903,6 @@ void fitMesh::fitFinalShape(const uint32_t iter)
 
 		modelParams[curFrame].setPose(curMParam.pose);
 	}
-	curMParam = bakMParam;
-	for (uint32_t a = iter / 2; a < iter; ++a)
-	{
-		solveAllShape(angleLimit*1.1, options);
-		printArray("\nshape param", curMParam.shape);
-		cout << "========================================\n";
-	}
-
-	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
-	showResult(scanFrames.back());
-	//wait until the window is closed
-	cout << "optimization finished\n";
-	logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
-	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
-	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
 void fitMesh::solveAllShape(const double angLim, const Solver::Options& options)
 {
@@ -916,6 +930,115 @@ void fitMesh::solveAllShape(const double angLim, const Solver::Options& options)
 
 		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
 			(new ShapeCostFunctor_D(&shapepose, modelParams[b], validNN, scanPts.back()));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
+
+	Solver::Summary summary;
+	cout << "solving...\n";
+	runcnt.store(0); runtime.store(0);
+	ceres::Solve(options, &problem, &summary);
+
+	cout << summary.BriefReport();
+	tSShape += runtime; cSShape += runcnt;
+	const double rt = runtime; const uint32_t rc = runcnt;
+	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+}
+void fitMesh::solveAllShapeRe(const double angLim, const Solver::Options& options)
+{
+	double err = 0;
+	double *shape = curMParam.shape;
+	Problem problem;
+	cout << "construct problem: SHAPE\n";
+
+	SimpleTimer timer;
+	for (uint32_t b = 0; b < modelParams.size(); ++b)
+	{
+		printFrame(b);
+		const auto& curScan = scanFrames[b];
+		tempbody.updPoints(shapepose.getModelFast(curMParam.shape, modelParams[b].pose));
+		tempbody.calcFaces();
+		tempbody.calcNormals();
+		tempbody.nntree.init(tempbody.vPts, tempbody.vNorms, tempbody.nPoints);
+
+		//dist^2 in fact
+		arColIS isValidNN(tempbody.nPoints, arma::fill::zeros);
+		miniBLAS::NNResult nnres(curScan.nPoints, tempbody.nntree.PTCount());
+		timer.Start();
+		tempbody.nntree.searchOnAnglePan(nnres, curScan.vPts, curScan.vNorms, angLim, angleLimit / 2);
+		timer.Stop();
+		cMatchNN++; tMatchNN += timer.ElapseMs();
+		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
+
+		vector<float> weights(curScan.nPoints, 0);
+		vector<uint32_t> idxMapper(curScan.nPoints);
+		{
+			uint32_t sumVNN = 0;
+			float distAll = 0;
+			const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+			for (uint32_t i = 0; i < curScan.nPoints; i++)
+			{
+				auto& idx = nnres.idxs[i];
+				if (idx > 65530)//unavailable already
+				{
+					idx = 0;
+					continue;
+				}
+				if (nnres.mthcnts[idx] > 6)//consider cut some link
+					if (nnres.mdists[idx] < nnres.dists[i])//not mininum
+						continue;// leave idx unchanged since it is legal
+				const auto thecos = curScan.vNorms[i] % tempbody.vNorms[idx];
+				if (thecos >= mincos)//satisfy angle limit
+				{
+					weights[i] = (thecos > limcos ? 1 : thecos * cosInv);//change weight to non-zero
+					sumVNN++;
+					distAll += nnres.dists[i];
+				}
+			}
+			memcpy(&idxMapper[0], nnres.idxs, sizeof(int32_t) * curScan.nPoints);
+			logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, distAll);
+		}
+		FILE *fp = fopen("output.data", "wb");
+		if (fp != nullptr)
+		{
+			uint32_t cnt;
+			uint8_t type;
+			char name[16] = { 0 };
+			{
+				fwrite(&camPos, sizeof(Vertex), 1, fp);
+			}
+			{
+				type = 0; fwrite(&type, sizeof(type), 1, fp);
+				strcpy(name, "temp"); fwrite(name, sizeof(name), 1, fp);
+				cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
+				fwrite(&tempbody.vPts[0], sizeof(Vertex), cnt, fp);
+			}
+			{
+				type = 0; fwrite(&type, sizeof(type), 1, fp);
+				strcpy(name, "scan"); fwrite(name, sizeof(name), 1, fp);
+				cnt = curScan.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
+				fwrite(&curScan.vPts[0], sizeof(Vertex), cnt, fp);
+			}
+			{
+				type = 1; fwrite(&type, sizeof(type), 1, fp);
+				strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
+				int32_t *tmp = new int32_t[curScan.nPoints];
+				auto pValid = isValidNN.memptr();
+				for (cnt = 0; cnt < curScan.nPoints; ++cnt)
+					tmp[cnt] = (weights[cnt] > 0 ? idxMapper[cnt] : 65536);
+				fwrite(&cnt, sizeof(cnt), 1, fp);
+				fwrite(tmp, sizeof(int), cnt, fp);
+				delete[] tmp;
+			}
+			fclose(fp);
+			printf("save KNN data to file successfully.\n");
+			//getchar();
+		}
+
+
+		showResult(curScan);
+
+		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe_D, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorRe_D(&shapepose, modelParams[b], curScan.vPts, weights, idxMapper, curScan.nPoints));
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
 
@@ -1066,7 +1189,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		{
 			type = 1; fwrite(&type, sizeof(type), 1, fp);
 			strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
-			int *tmp = new int[tempbody.nPoints];
+			int32_t *tmp = new int32_t[tempbody.nPoints];
 			auto pValid = isValidNN.memptr();
 			for (cnt = 0; cnt < tempbody.nPoints; ++cnt)
 				tmp[cnt] = (pValid[cnt] ? idxs[cnt] : 65536);
@@ -1090,7 +1213,7 @@ void fitMesh::buildModelColor()
 		tempbody.vColors.resize(tempbody.nPoints);
 		memset(&tempbody.vColors[0], 0x0, sizeof(Vertex) * tempbody.nPoints);
 		vector<float> times(tempbody.nPoints, 0);
-		for (uint32_t a = 0; a <= curFrame; ++a)
+		for (uint32_t a = 0; a < scanFrames.size(); ++a)
 		{
 			printf("calculating frame %d...", a);
 			const auto& mp = modelParams[a];
@@ -1236,10 +1359,19 @@ void fitMesh::mainProcess()
 		});
 		modelParams.push_back(curMParam);
 	}
+	if (curFrame == 0 && yesORno("load previous 9999 params?"))
+		readMParamScan(buildName(9999));
+	else
+		saveMParam(buildName(9999));
 	if (yesORno("run final optimization on SHAPE?"))
 	{
 		setTitle("Final Optimazing...");
-		fitFinalShape(6);
+		fitFinalShape(9, [](const uint32_t cur, const uint32_t iter, const double aLim)
+		{
+			const bool isSolveShape = (cur % 3 != 0);
+			const double ang = (isSolveShape ? (1.2 - cur*0.05) : (1.1 - cur*0.025)) * aLim;
+			return make_tuple(ang, isSolveShape, cur < 2);
+		});
 		printf("final optimization finished.\n");
 		modelParams.push_back(curMParam);
 		getchar();
@@ -1259,7 +1391,7 @@ std::string fitMesh::buildName(const uint32_t frame)
 	fname += "_f" + std::to_string(frame);
 	return fname;
 }
-void fitMesh::saveMParam(const std::string& fname)
+bool fitMesh::saveMParam(const std::string& fname)
 {
 	printf("writing final csv...");
 	string csvname = fname + ".csv";
@@ -1314,22 +1446,22 @@ void fitMesh::saveMParam(const std::string& fname)
 		fwrite(&modelParams[0], sizeof(ModelParam), count, fp);
 		fclose(fp);
 		printf("done\n");
+		return true;
 	}
 	else
 	{
 		printf("fail\n");
+		return false;
 	}
 }
-
-void fitMesh::watch(const uint32_t frameCount)
+bool fitMesh::readMParamScan(const std::string& fname)
 {
-	uint32_t scancount;
 	printf("reading final dat...");
-	const string fname = buildName(frameCount);
 	string datname = fname + ".dat";
 	FILE *fp = fopen(datname.c_str(), "rb");
 	if (fp != nullptr)
 	{
+		uint32_t scancount;
 		fread(&scancount, sizeof(uint32_t), 1, fp);
 		uint32_t mpcount;
 		fread(&mpcount, sizeof(uint32_t), 1, fp);
@@ -1337,21 +1469,29 @@ void fitMesh::watch(const uint32_t frameCount)
 		fread(&modelParams[0], sizeof(ModelParam), mpcount, fp);
 		fclose(fp);
 		printf("done\n");
+
+		while (curFrame + 1 < scancount)
+		{
+			curFrame++;
+			scanFrames.push_back(CScan());
+			CScan& curScan = scanFrames.back();
+			if (!loadScan(curScan))
+				break;
+			DirectRigidAlign(curScan);
+		}
+		return true;
 	}
 	else
 	{
 		printf("fail\n");
-		return;
+		return false;
 	}
+}
 
-	while (++curFrame < scancount)
-	{
-		scanFrames.push_back(CScan());
-		CScan& curScan = scanFrames.back();
-		if (!loadScan(curScan))
-			break;
-		DirectRigidAlign(curScan);
-	}
+void fitMesh::watch(const uint32_t frameCount)
+{
+	const string fname = buildName(frameCount);
+	readMParamScan(fname);
 	watch();
 }
 

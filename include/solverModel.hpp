@@ -23,7 +23,6 @@ public:
 		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape))
 	{
 	}
-	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose, double* residual) const
 	{
 		SimpleTimer timer;
@@ -62,7 +61,6 @@ public:
 		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
 	{
 	}
-	//w is the parameters to be estimated, b is the bias, residual is to return
 	bool operator() (const double* shape, double* residual) const
 	{
 		SimpleTimer timer;
@@ -130,7 +128,6 @@ public:
 	{
 		weights = wgts;
 	}
-	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double* pose, double* residual) const
 	{
 		const bool isWgt = (weights.size() > 0);
@@ -193,7 +190,6 @@ public:
 		: shapepose_(shapepose), poseParam_(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_)
 	{
 	}
-	//w is the parameters to be estimated, b is the bias, residual is to return
 	bool operator() (const double* shape, double* residual) const
 	{
 		SimpleTimer timer;
@@ -279,7 +275,6 @@ public:
 		basePt(shapepose_->getBaseModel(modelParam.shape)), ptCache(buildCache(shapepose, preParam, isValidNN, validScanCache))
 	{
 	}
-	//pose is the parameters to be estimated, b is the bias, residual is to return
 	bool operator()(const double *pose, double *residual) const
 	{
 		SimpleTimer timer;
@@ -311,6 +306,47 @@ struct PoseCostFunctorPred_D : public PoseCostFunctorPred
 		timer.Stop();
 		runcnt++;
 		runtime += uint32_t(timer.ElapseUs());
+		return true;
+	}
+};
+
+struct ShapeCostFunctorRe_D
+{
+protected:
+	// this should be the firtst to declare in order to be initialized before other things
+	const CShapePose *shapepose_;
+	const double(&poseParam_)[POSPARAM_NUM];
+	const std::vector<float> weights;
+	const std::vector<uint32_t> idxMapper;
+	const uint32_t ptcount;
+	const miniBLAS::VertexVec& scanCache;
+public:
+	ShapeCostFunctorRe_D(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
+		: shapepose_(shapepose), poseParam_(modelParam.pose), weights(weights_), idxMapper(idxMapper_), scanCache(scanCache_), ptcount(ptcount_)
+	{
+	}
+	bool operator() (const double* shape, double* residual) const
+	{
+		SimpleTimer timer;
+		const auto pts = shapepose_->getModelFast(shape, poseParam_);
+		VertexVec tmp(1 + EVALUATE_POINTS_NUM / 4);
+		memset(&tmp[0], 0x0, (1 + EVALUATE_POINTS_NUM / 4) * sizeof(Vertex));
+		float *__restrict pTmp = tmp[0];
+		for (uint32_t j = 0; j < ptcount; ++j)
+		{
+			const auto idx = idxMapper[j];
+			pTmp[idx] += (scanCache[j] - pts[idx]).length_sqr() * weights[j];
+		}
+
+		for (auto& obj : tmp)
+			obj.do_sqrt();
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+			residual[j] = pTmp[j];
+
+		timer.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
 		return true;
 	}
 };

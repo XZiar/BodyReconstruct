@@ -27,6 +27,7 @@ struct ModelBase
 	miniBLAS::VertexVec vNorms;
 	miniBLAS::VertexVec vColors; 
 	uint32_t nPoints;
+	miniBLAS::h3NNTree nntree;
 	void ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud) const;
 	void ShowPC(pcl::PointCloud<pcl::PointXYZRGB>& cloud, pcl::PointXYZRGB color, const bool isCalcNorm = true) const;
 };
@@ -43,7 +44,6 @@ struct CScan : public ModelBase
     arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     //cv::flann::Index *kdtree;
-	miniBLAS::h3NNTree nntree;
 
 	void prepare();
 };
@@ -152,7 +152,7 @@ private:
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
-	ModelParam curMParam, bakMParam, tmpMParam;
+	ModelParam curMParam, bakMParam, predMParam;
 	PtrModSmooth msmooth;
 
 	void loadTemplate();
@@ -174,10 +174,18 @@ private:
 	 **/
 	void fitShapePose(const CScan& scan, const uint32_t iter, 
 		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
-	void fitFinalShape(const uint32_t iter);
+	/** @brief fitFinalShape
+	 ** Fit the model to the whole scan series by pose & shape
+	 ** @param -paramer  a function to determine solve params by iteration
+	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
+	 **					cur_iter, all_iter, angle_limit ==> angle_limit, solveshape OR solvepose, pred(only in solvepose)
+	 **/
+	void fitFinalShape(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
 	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
 	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
+	void solveAllPose(const double angLim, const bool dopred, const ceres::Solver::Options& options);
 	void solveAllShape(const double angLim, const ceres::Solver::Options& options);
+	void solveAllShapeRe(const double angLim, const ceres::Solver::Options& options);
 	
 	void buildModelColor();
 
@@ -193,7 +201,8 @@ private:
 	 **/
 	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr) const;
 	
-	void saveMParam(const std::string& fname);
+	bool saveMParam(const std::string& fname);
+	bool readMParamScan(const std::string& fname);
 	void showFrame(const uint32_t frame);
 
 	std::string buildName(const uint32_t frame);
