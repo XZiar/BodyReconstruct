@@ -674,7 +674,7 @@ void CMesh::prepareData()
 	//thePtSmooth = &ptSmooth[0];
 }
 
-PtrModSmooth CMesh::preCompute(const char *__restrict validMask) const
+PtrModSmooth CMesh::preCompute(const int8_t *__restrict validMask) const
 {
 	PtrModSmooth validSmooth = std::make_shared<ModelSmooth>();
 	validSmooth->ptSmooth.clear();
@@ -1471,7 +1471,7 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 		vPoints[row].assign(newval);
 	}
 }
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const char *__restrict validMask)
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
 {
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]

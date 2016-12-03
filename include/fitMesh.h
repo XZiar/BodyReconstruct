@@ -8,7 +8,7 @@
 
 #include "kdNNTree.hpp"
 
-using arColIS = arma::Col<char>;
+using arColIS = std::vector<int8_t>;
 
 void printMat(const char *str, arma::mat m);
 void printMatAll(const char *str, arma::mat m);
@@ -69,19 +69,16 @@ struct CTemplate : public ModelBase
 
 struct ModelParam
 {
-	double pose[POSPARAM_NUM];
-	double shape[SHAPEPARAM_NUM];
+	using PoseParam = std::array<double, POSPARAM_NUM>;
+	using ShapeParam = std::array<double, SHAPEPARAM_NUM>;
+	PoseParam pose;
+	ShapeParam shape;
 	ModelParam() 
-	{ 
-		memset(pose, 0, sizeof(double)*(POSPARAM_NUM + SHAPEPARAM_NUM));
-	};
-	void setPose(const double(&pose_)[POSPARAM_NUM])
 	{
-		memmove(pose, pose_, sizeof(double)*POSPARAM_NUM);
+		pose.fill(0); shape.fill(0);
 	};
-	void setShape(const double(&shape_)[SHAPEPARAM_NUM])
+	ModelParam(const PoseParam& pose_, const ShapeParam& shape_) : pose(pose_), shape(shape_)
 	{
-		memmove(shape, shape_, sizeof(double)*SHAPEPARAM_NUM);
 	};
 };
 
@@ -119,11 +116,11 @@ public:
 	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true, isRefresh = true;
 	SimpleLog logger;
 
-	bool isFastCost = false;
+	bool isFastCost = true;
 	bool isRayTrace = false;
-	bool isAngWgt = false;
+	bool isAngWgt = true;
 	bool isShFix = true;
-	//bool useFLANN = false;
+
 	uint32_t nSamplePoints;
     int angleLimit;
     std::string dataDir;
@@ -181,18 +178,18 @@ private:
 	 **					cur_iter, all_iter, angle_limit ==> angle_limit, solveshape OR solvepose, pred(only in solvepose)
 	 **/
 	void fitFinalShape(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
-	void solvePose(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
-	void solveShape(const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
-	void solveAllPose(const double angLim, const bool dopred, const ceres::Solver::Options& options);
-	void solveAllShape(const double angLim, const ceres::Solver::Options& options);
-	void solveAllShapeRe(const double angLim, const ceres::Solver::Options& options);
+	void solvePose(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
+	void solveShape(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
+	void solveAllPose(const ceres::Solver::Options& options, const double angLim, const bool dopred);
+	void solveAllShape(const ceres::Solver::Options& options, const double angLim);
+	void solveAllShapeRe(const ceres::Solver::Options& options, const double angLim);
 	
 	void buildModelColor();
 
 	/** @brief nnFilter
 	 ** @param -angLim  max angle(in degree) between two norms
 	 **/
-	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& result, const miniBLAS::VertexVec& scNorms, const double angLim);
+	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& isValid, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
 
 	uint32_t updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);

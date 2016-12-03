@@ -92,7 +92,7 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 	mesh.fastShapeChangesToMesh_AVX(vShape);
 	return std::move(mesh.vPoints);
 }
-CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const char *__restrict validMask) const
+CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const
 {
 	// Read object model
 	CMesh initMesh(initMesh_bk, nullptr);
@@ -132,7 +132,7 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 	return std::move(mesh.vPoints);
 }
 VertexVec CShapePose::getModelByPose2(const PtrModSmooth mSmooth, const CMesh& baseMesh,
-	const double *__restrict poseParamsIn, const char *__restrict validMask) const
+	const double *__restrict poseParamsIn, const int8_t *__restrict validMask) const
 {
 	// Read object model
 	CMesh mesh(initMesh_bk, baseMesh, mSmooth);
@@ -189,7 +189,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	return std::move(mesh.vPoints);
 }
 VertexVec CShapePose::getModelFast2(const PtrModSmooth mSmooth, 
-	const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const char *__restrict validMask) const
+	const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const int8_t *__restrict validMask) const
 {
 	// Read object model
 	CMesh mesh(initMesh_bk, nullptr);

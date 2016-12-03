@@ -143,14 +143,14 @@ public:
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
-	PtrModSmooth preCompute(const char *__restrict validMask) const;
+	PtrModSmooth preCompute(const int8_t *__restrict validMask) const;
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const char *__restrict validMask);
+	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	int updateJntPos();
 	void updateJntPosEx();
 	

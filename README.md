@@ -15,7 +15,7 @@ x64 only
 
 ##Structure
 ###BodyReconstruct.pro
-qt5.7 preoject
+qt5.7 project
 ###BodyReconstruct.sln
 vs2015 solution
 ###BodyReconstruct.vcxproj
