@@ -171,15 +171,19 @@ private:
 	 **/
 	void fitShapePose(const CScan& scan, const uint32_t iter, 
 		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
-	/** @brief fitFinalShape
+	void fitShapePoseRe(const CScan& scan, const uint32_t iter,
+		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	/** @brief fitFinal
 	 ** Fit the model to the whole scan series by pose & shape
 	 ** @param -paramer  a function to determine solve params by iteration
 	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
 	 **					cur_iter, all_iter, angle_limit ==> angle_limit, solveshape OR solvepose, pred(only in solvepose)
 	 **/
-	void fitFinalShape(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	void fitFinal(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
 	void solvePose(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
+	void solvePoseRe(const ceres::Solver::Options& options, const CScan& curScan, const std::vector<uint32_t>& idxs, const double lastErr, const uint32_t curiter);
 	void solveShape(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);
+	void solveShapeRe(const ceres::Solver::Options& options, const CScan& curScan, const std::vector<uint32_t>& idxs, const double lastErr);
 	void solveAllPose(const ceres::Solver::Options& options, const double angLim, const bool dopred);
 	void solveAllShape(const ceres::Solver::Options& options, const double angLim);
 	void solveAllShapeRe(const ceres::Solver::Options& options, const double angLim);
@@ -193,6 +197,7 @@ private:
 	void raytraceCut(miniBLAS::NNResult& res) const;
 
 	uint32_t updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
+	uint32_t updatePointsRe(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess
 	 **/

@@ -394,6 +394,7 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 	const uint32_t count = ret.objSize;
 	int *idxs = ret.idxs; float *dists = ret.dists;
 	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angMax / 180)), limcos = _mm256_set1_ps(cos(3.1415926 * angLim / 180));
+	const __m256 panMin = _mm256_set1_ps(1);
 	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
 	for (uint32_t a = count; a--; ++pVert, ++pNorm)
 	{
@@ -436,8 +437,8 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 			if (!_mm256_movemask_ps(cosRes))//angle all unsatisfied
 				continue;
 
-			const __m256 panMask = _mm256_and_ps(_mm256_cmp_ps(cos8, limcos, _CMP_LT_OS), cosRes);//those need to be panish
-			const __m256 pan8 = _mm256_div_ps(limcos, cos8);
+			//const __m256 panMask = _mm256_and_ps(_mm256_cmp_ps(cos8, limcos, _CMP_LT_OS), cosRes);//those need to be panish
+			const __m256 pan8 = _mm256_max_ps(_mm256_div_ps(limcos, cos8), panMin);
 
 			//make up vector contain 8 dist data(dist^2)
 			const __m256 the8 = _mm256_blend_ps
@@ -446,7 +447,8 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 				_mm256_blend_ps(_mm256_dp_ps(a3, a3, 0x74)/*00,d5,0;00,d6,0*/, _mm256_dp_ps(a4, a4, 0x78)/*000,d7;000,d8*/, 0x88)/*00,d5,d7;00,d6,d8*/,
 				0b11001100
 			)/*d1,d3,d5,d7;d2,d4,d6,d8*/;
-			const __m256 this8 = _mm256_blendv_ps(the8, _mm256_mul_ps(the8, pan8), panMask);
+			//const __m256 this8 = _mm256_blendv_ps(the8, _mm256_mul_ps(the8, pan8), panMask);
+			const __m256 this8 = _mm256_mul_ps(the8, pan8);
 
 			//find out which idx need to be updated(less than current and satisfy angle-requierment)
 			const __m256 mask = _mm256_and_ps(_mm256_cmp_ps(this8, min8, _CMP_LT_OS), cosRes);

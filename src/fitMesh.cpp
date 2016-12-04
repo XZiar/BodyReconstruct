@@ -346,7 +346,7 @@ void fitMesh::loadLandmarks()
   */
 bool fitMesh::loadScan(CScan& scan)
 {
-	PointCloudT::Ptr cloud_tmp(new PointCloudT);
+	PointCloudT cloud_tmp;
 	pcl::PolygonMesh mesh;
 	string fname = dataDir + baseFName;
 	if (mode)
@@ -364,36 +364,28 @@ bool fitMesh::loadScan(CScan& scan)
 	}
 
 	cout << "loading " << fname << endl;
-	const int read_status = pcl::io::loadPLYFile(fname, *cloud_tmp);
-	printf("read status: %d, load %lld points AND normals.\n", read_status, cloud_tmp->points.size());
+	const int read_status = pcl::io::loadPLYFile(fname, cloud_tmp);
+	printf("read status: %d, load %lld points AND normals.\n", read_status, cloud_tmp.points.size());
 
-	scan.nPoints = cloud_tmp->points.size();
+	scan.nPoints = cloud_tmp.points.size();
 	scan.points_orig.resize(scan.nPoints, 3);
 	scan.normals_orig.resize(scan.nPoints, 3);
 	scan.vColors.reserve(scan.nPoints);
-	uint32_t idx = 0;
-	if (mode)
+		
+	for (uint32_t idx = 0; idx < scan.nPoints; ++idx)
 	{
-		for (const PointT& pt : cloud_tmp->points)//m 2 mm
+		const PointT& pt = cloud_tmp.points[idx];
+		scan.vColors.push_back(Vertex(pt.r, pt.b, pt.b));
+		if (mode)
 		{
 			scan.points_orig.row(idx) = arma::rowvec({ pt.x, -pt.y, pt.z }) * 1000;
 			scan.normals_orig.row(idx) = arma::rowvec({ pt.normal_x, -pt.normal_y, pt.normal_z });
-			idx++;
 		}
-	}
-	else
-	{
-		for (const PointT& pt : cloud_tmp->points)//m 2 mm
+		else
 		{
 			scan.points_orig.row(idx) = arma::rowvec({ -pt.y, pt.z, -pt.x }) * 1000;
 			scan.normals_orig.row(idx) = arma::rowvec({ -pt.normal_y, pt.normal_z, -pt.normal_x });
-			idx++;
 		}
-	}
-	for (uint32_t a = 0; a < scan.nPoints; ++a)
-	{
-		const PointT& pt = cloud_tmp->points[a];
-		scan.vColors.push_back(Vertex(pt.r, pt.b, pt.b));
 	}
 	//normalize the normals
 	scan.normals_orig = arma::normalise(scan.normals_orig, 2, 1);
@@ -710,7 +702,67 @@ void fitMesh::fitShapePose(const CScan& scan, const uint32_t iter, function<tupl
 		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	if (solvedS)
 		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
-	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+	logger.log(true, "KNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+}
+void fitMesh::fitShapePoseRe(const CScan & scan, const uint32_t iter,
+	std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer)
+{
+	double err = 0;
+	uint32_t sumVNN;
+	tSPose = tSShape = tMatchNN = 0;
+	cSPose = cSShape = cMatchNN = 0;
+	bool solvedS = false, solvedP = false;
+	vector<uint32_t> idxMapper;
+	predMParam = bakMParam = curMParam;
+
+	Solver::Options options;
+	options.minimizer_type = ceres::TRUST_REGION;
+	options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+	options.linear_solver_type = ceres::DENSE_QR;
+	options.num_threads = 2;
+	options.num_linear_solver_threads = 2;
+	options.minimizer_progress_to_stdout = true;
+	//Optimization Loop
+	for (uint32_t a = 0; a < iter; ++a)
+	{
+		const auto param = paramer(a, iter, angleLimit);
+		sumVNN = updatePointsRe(scan, curMParam, std::get<0>(param), idxMapper, err);
+		showResult(scan);
+
+		if (std::get<1>(param))
+		{
+			cout << "fit poseRe\n";
+			solvedP = true;
+			solvePoseRe(options, scan, idxMapper, err, a);
+			//copy first correction of base 6 param
+			for (uint32_t b = 0; b < 6; ++b)
+				predMParam.pose[b] = curMParam.pose[b];
+			//reset bone angle to stay fixed with last frame but allow some changes
+			for (uint32_t b = 6; b < POSPARAM_NUM; ++b)
+				predMParam.pose[b] = (bakMParam.pose[b] * 4 + curMParam.pose[b]) / 5;
+		}
+		if (std::get<2>(param))
+		{
+			cout << "fit shapeRe\n";
+			solvedS = true;
+			solveShapeRe(options, scan, idxMapper, err);
+			if (curFrame > 0)
+			{
+				for (uint32_t a = 0; a < SHAPEPARAM_NUM; ++a)
+					curMParam.shape[a] = (curMParam.shape[a] + bakMParam.shape[a]) * 0.5;
+			}
+			predMParam.shape = curMParam.shape;
+		}
+	}
+	sumVNN = updatePointsRe(scan, curMParam, angleLimit, idxMapper, err);
+	showResult(scan);
+	//wait until the window is closed
+	cout << "optimization finished\n";
+	if (solvedP)
+		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
+	if (solvedS)
+		logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
+	logger.log(true, "KNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
 void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter)
 {
@@ -797,7 +849,66 @@ void fitMesh::solveShape(const ceres::Solver::Options& options, const miniBLAS::
 	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
-void fitMesh::fitFinalShape(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer)
+void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &curScan, const std::vector<uint32_t>& idxs, const double lastErr, const uint32_t curiter)
+{
+	double *pose = curMParam.pose.data();
+
+	cout << "construct problem: pose\n";
+	Problem problem;
+
+	auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+		(new PoseCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+	problem.AddResidualBlock(cost_function, NULL, pose);
+
+	if (curFrame > 0)
+	{
+		auto *soft_function = new ceres::NumericDiffCostFunction<MovementSofter, ceres::CENTRAL, POSPARAM_NUM, POSPARAM_NUM>
+			(new MovementSofter(modelParams.back(), lastErr));
+		problem.AddResidualBlock(soft_function, NULL, pose);
+	}
+	Solver::Summary summary;
+
+	cout << "solving...\n";
+	runcnt.store(0);
+	runtime.store(0);
+	ceres::Solve(options, &problem, &summary);
+
+	cout << summary.BriefReport();
+	tSPose += runtime; cSPose += runcnt;
+	const double rt = runtime; const uint32_t rc = runcnt;
+	logger.log(summary.FullReport()).log(true, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+}
+void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const CScan& curScan, const std::vector<uint32_t>& idxs, const double lastErr)
+{
+	double *shape = curMParam.shape.data();
+
+	Problem problem;
+	cout << "construct problem: SHAPE\n";
+
+	auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+		(new ShapeCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+	problem.AddResidualBlock(cost_function, NULL, shape);
+
+	if (curFrame > 0)
+	{
+		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
+			(new ShapeSofter(modelParams.back(), sqrt(lastErr / SHAPEPARAM_NUM)));
+		problem.AddResidualBlock(soft_function, NULL, shape);
+	}
+	Solver::Summary summary;
+
+	cout << "solving...\n";
+	runcnt.store(0);
+	runtime.store(0);
+	ceres::Solve(options, &problem, &summary);
+
+	cout << summary.BriefReport();
+	tSShape += runtime; cSShape += runcnt;
+	const double rt = runtime; const uint32_t rc = runcnt;
+	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
+}
+
+void fitMesh::fitFinal(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer)
 {
 	isFastCost = true;
 	double err = 0;
@@ -818,7 +929,7 @@ void fitMesh::fitFinalShape(const uint32_t iter, std::function<std::tuple<double
 	for (auto& sc : scanFrames)
 		sc.nntree.MAXDist2 = 3e3f;
 	tempbody.nntree.MAXDist2 = 3e3f;
-	const bool isFitRe = yesORno("use reverse-match t solve shape?");
+	const bool isFitRe = yesORno("use reverse-match to solve shape?");
 
 	for (uint32_t a = 0; a < iter; ++a)
 	{
@@ -846,7 +957,7 @@ void fitMesh::fitFinalShape(const uint32_t iter, std::function<std::tuple<double
 	cout << "optimization finished\n";
 	logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
-	logger.log(true, "\n\nKNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
+	logger.log(true, "KNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
 }
 void fitMesh::solveAllPose(const ceres::Solver::Options& options, const double angLim, const bool dopred)
 {
@@ -856,7 +967,7 @@ void fitMesh::solveAllPose(const ceres::Solver::Options& options, const double a
 	{
 		printFrame(curFrame);
 		curMParam.pose = modelParams[curFrame].pose;
-		if (dopred && curFrame > 0 && curFrame < modelParams.size())
+		if (dopred && curFrame > 0 && curFrame < modelParams.size() - 1)
 		{
 			const auto& prev = modelParams[curFrame - 1], &next = modelParams[curFrame + 1];
 			for (uint32_t b = 0; b < POSPARAM_NUM; ++b)
@@ -929,81 +1040,10 @@ void fitMesh::solveAllShapeRe(const ceres::Solver::Options& options, const doubl
 	for (uint32_t b = 0; b < modelParams.size(); ++b)
 	{
 		printFrame(b);
+		vector<uint32_t> idxMapper;
 		const auto& curScan = scanFrames[b];
-		tempbody.updPoints(shapepose.getModelFast(shape, modelParams[b].pose.data()));
-		tempbody.calcFaces();
-		tempbody.calcNormals();
-		tempbody.nntree.init(tempbody.vPts, tempbody.vNorms, tempbody.nPoints);
-
-		//dist^2 in fact
-		miniBLAS::NNResult nnres(curScan.nPoints, tempbody.nntree.PTCount());
-		timer.Start();
-		tempbody.nntree.searchOnAnglePan(nnres, curScan.vPts, curScan.vNorms, angLim, angleLimit / 2);
-		timer.Stop();
-		cMatchNN++; tMatchNN += timer.ElapseMs();
-		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
-
-		vector<float> weights(curScan.nPoints, 0);
-		vector<uint32_t> idxMapper(curScan.nPoints);
-		{
-			uint32_t sumVNN = 0;
-			float distAll = 0;
-			const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
-			for (uint32_t i = 0; i < curScan.nPoints; i++)
-			{
-				auto& idx = nnres.idxs[i];
-				if (idx > 65530)//unavailable already
-				{
-					idx = 0;
-					continue;
-				}
-				if (nnres.mthcnts[idx] > 6)//consider cut some link
-					if (nnres.mdists[idx] < nnres.dists[i])//not mininum
-						continue;// leave idx unchanged since it is legal
-				const auto thecos = curScan.vNorms[i] % tempbody.vNorms[idx];
-				if (thecos >= mincos)//satisfy angle limit
-				{
-					weights[i] = (thecos > limcos ? 1 : thecos * cosInv);//change weight to non-zero
-					sumVNN++;
-					distAll += nnres.dists[i];
-				}
-			}
-			memcpy(&idxMapper[0], nnres.idxs, sizeof(int32_t) * curScan.nPoints);
-			logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, distAll);
-		}
-		FILE *fp = fopen("output.data", "wb");
-		if (fp != nullptr)
-		{
-			uint32_t cnt;
-			uint8_t type;
-			char name[16] = { 0 };
-			{
-				fwrite(&camPos, sizeof(Vertex), 1, fp);
-			}
-			{
-				type = 0; fwrite(&type, sizeof(type), 1, fp);
-				strcpy(name, "temp"); fwrite(name, sizeof(name), 1, fp);
-				cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
-				fwrite(&tempbody.vPts[0], sizeof(Vertex), cnt, fp);
-			}
-			{
-				type = 0; fwrite(&type, sizeof(type), 1, fp);
-				strcpy(name, "scan"); fwrite(name, sizeof(name), 1, fp);
-				cnt = curScan.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
-				fwrite(&curScan.vPts[0], sizeof(Vertex), cnt, fp);
-			}
-			{
-				type = 1; fwrite(&type, sizeof(type), 1, fp);
-				strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
-				int32_t *tmp = new int32_t[curScan.nPoints];
-				for (cnt = 0; cnt < curScan.nPoints; ++cnt)
-					tmp[cnt] = (weights[cnt] > 0 ? idxMapper[cnt] : 65536);
-				fwrite(&cnt, sizeof(cnt), 1, fp);
-				fwrite(tmp, sizeof(int), cnt, fp);
-				delete[] tmp;
-			}
-			fclose(fp);
-		}
+		curMParam.pose = modelParams[b].pose;
+		updatePointsRe(curScan, curMParam, angLim, idxMapper, err);
 
 		showResult(curScan);
 
@@ -1071,7 +1111,6 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 	tempbody.calcNormals();
 
 	SimpleTimer timer;
-	idxs.resize(tempbody.nPoints); uint32_t *__restrict pidxNN = &idxs[0];
 	//dist^2 in fact
 	arColIS isValidNN;
 	miniBLAS::NNResult nnres(tempbody.nPoints, scan.nntree.PTCount());
@@ -1083,7 +1122,8 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		timer.Stop();
 		cMatchNN++; tMatchNN += timer.ElapseMs();
 		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
-		memcpy(pidxNN, nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
+		idxs.resize(tempbody.nPoints);
+		memcpy(idxs.data(), nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
 		weights = nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
 
@@ -1127,7 +1167,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 			type = 1; fwrite(&type, sizeof(type), 1, fp);
 			strcpy(name, "avxNN"); fwrite(name, sizeof(name), 1, fp);
 			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
-			fwrite(pidxNN, sizeof(int), cnt, fp);
+			fwrite(idxs.data(), sizeof(int), cnt, fp);
 		}
 		{
 			type = 1; fwrite(&type, sizeof(type), 1, fp);
@@ -1143,6 +1183,88 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		printf("save KNN data to file successfully.\n");
     }
 	isValidNN_rtn = isValidNN;
+	return sumVNN;
+}
+
+uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, const double angLim, std::vector<uint32_t>& idxs, double & err)
+{
+	tempbody.updPoints(shapepose.getModelFast(mPar.shape.data(), mPar.pose.data()));
+	tempbody.calcFaces();
+	tempbody.calcNormals();
+	tempbody.nntree.init(tempbody.vPts, tempbody.vNorms, tempbody.nPoints);
+
+	uint32_t sumVNN = 0;
+	SimpleTimer timer;
+	miniBLAS::NNResult nnres(scan.nPoints, tempbody.nntree.PTCount());
+	timer.Start();
+	tempbody.nntree.searchOnAnglePan(nnres, scan.vPts, scan.vNorms, angLim, angleLimit / 2);
+	timer.Stop();
+	cMatchNN++; tMatchNN += timer.ElapseMs();
+	logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
+
+	{
+		weights.swap(vector<float>(scan.nPoints, 0));
+		float distAll = 0;
+		const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+		for (uint32_t i = 0; i < scan.nPoints; i++)
+		{
+			auto& idx = nnres.idxs[i];
+			if (idx > 65530)//unavailable already
+			{
+				idx = 0;
+				continue;
+			}
+			if (nnres.mthcnts[idx] > 6)//consider cut some link
+				if (nnres.mdists[idx] < nnres.dists[i])//not mininum
+					continue;// leave idx unchanged since it is legal
+			const auto thecos = scan.vNorms[i] % tempbody.vNorms[idx];
+			if (thecos >= mincos)//satisfy angle limit
+			{
+				weights[i] = (thecos > limcos ? 1 : thecos * cosInv);//change weight to non-zero
+				sumVNN++;
+				distAll += nnres.dists[i];
+			}
+		}
+		idxs.resize(scan.nPoints);
+		memcpy(idxs.data(), nnres.idxs, sizeof(int32_t) * scan.nPoints);
+		err = distAll;
+		logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, distAll);
+	}
+
+	FILE *fp = fopen("output.data", "wb");
+	if (fp != nullptr)
+	{
+		uint32_t cnt;
+		uint8_t type;
+		char name[16] = { 0 };
+		{
+			fwrite(&camPos, sizeof(Vertex), 1, fp);
+		}
+		{
+			type = 0; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "temp"); fwrite(name, sizeof(name), 1, fp);
+			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
+			fwrite(&tempbody.vPts[0], sizeof(Vertex), cnt, fp);
+		}
+		{
+			type = 0; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "scan"); fwrite(name, sizeof(name), 1, fp);
+			cnt = scan.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
+			fwrite(&scan.vPts[0], sizeof(Vertex), cnt, fp);
+		}
+		{
+			type = 1; fwrite(&type, sizeof(type), 1, fp);
+			strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
+			int32_t *tmp = new int32_t[scan.nPoints];
+			for (cnt = 0; cnt < scan.nPoints; ++cnt)
+				tmp[cnt] = (weights[cnt] > 0 ? idxs[cnt] : 65536);
+			fwrite(&cnt, sizeof(cnt), 1, fp);
+			fwrite(tmp, sizeof(int), cnt, fp);
+			delete[] tmp;
+		}
+		fclose(fp);
+		printf("save Re-KNN data to file successfully.\n");
+	}
 	return sumVNN;
 }
 
@@ -1268,6 +1390,7 @@ void fitMesh::mainProcess()
 		getchar();
 	if (mode)//only once
 		return;
+	const bool useRE = yesORno("use RE version of fit?");
 	int leastframe = inputNumber("at least fit to which frame?", 0);
 	while (curFrame < leastframe || yesORno("fit next frame?"))
 	{
@@ -1278,7 +1401,7 @@ void fitMesh::mainProcess()
 			break;
 		//rigid align the scan
 		DirectRigidAlign(curScan);
-		curScan.nntree.MAXDist2 = 5e3f;
+		curScan.nntree.MAXDist2 = tempbody.nntree.MAXDist2 = 5e3f;
 		if (curFrame > 3)
 		{
 			const auto& p0 = modelParams[curFrame - 4].pose, &p1 = modelParams[curFrame - 3].pose,
@@ -1290,16 +1413,32 @@ void fitMesh::mainProcess()
 				curMParam.pose[a] += (p2[a] + p3[a] - p0[a] - p1[a]) / (4 * 2);
 		}
 		printFrame(curFrame);
-		fitShapePose(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim)
+		if (useRE)
 		{
-			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
-			const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
-			const uint32_t obj_iter = std::min(iter - 1, (iter + 3) / 2);
-			if (cur == obj_iter)
-				return make_tuple(angLim, true, true);
-			else
-				return make_tuple(angLim, true, false);
-		});
+			fitShapePoseRe(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim)
+			{
+				/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
+				const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
+				const uint32_t obj_iter = std::min(iter - 1, (iter + 3) / 2);
+				if (cur == obj_iter)
+					return make_tuple(angLim, true, true);
+				else
+					return make_tuple(angLim, true, false);
+			});
+		}
+		else
+		{
+			fitShapePose(curScan, 4, [](const uint32_t cur, const uint32_t iter, const double aLim)
+			{
+				/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
+				const double angLim = aLim * (1 - std::log(0.65 + 0.35 * cur / iter));
+				const uint32_t obj_iter = std::min(iter - 1, (iter + 3) / 2);
+				if (cur == obj_iter)
+					return make_tuple(angLim, true, true);
+				else
+					return make_tuple(angLim, true, false);
+			});
+		}
 		modelParams.push_back(curMParam);
 	}
 	if (curFrame == 0 && yesORno("load previous 9999 params?"))
@@ -1309,7 +1448,7 @@ void fitMesh::mainProcess()
 	if (yesORno("run final optimization on SHAPE?"))
 	{
 		setTitle("Final Optimazing...");
-		fitFinalShape(9, [](const uint32_t cur, const uint32_t iter, const double aLim)
+		fitFinal(9, [](const uint32_t cur, const uint32_t iter, const double aLim)
 		{
 			const bool isSolveShape = (cur % 3 != 0);
 			const double ang = (isSolveShape ? (1.2 - cur*0.05) : (1.1 - cur*0.025)) * aLim;
