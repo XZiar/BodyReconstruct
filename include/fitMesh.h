@@ -119,6 +119,7 @@ public:
 	bool isFastCost = true;
 	bool isRayTrace = false;
 	bool isAngWgt = true;
+	bool isReMin = false;
 	bool isShFix = true;
 
 	uint32_t nSamplePoints;

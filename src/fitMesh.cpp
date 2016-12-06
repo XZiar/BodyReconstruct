@@ -722,6 +722,7 @@ void fitMesh::fitShapePoseRe(const CScan & scan, const uint32_t iter,
 	options.num_threads = 2;
 	options.num_linear_solver_threads = 2;
 	options.minimizer_progress_to_stdout = true;
+	options.max_num_line_search_direction_restarts = 10;
 	//Optimization Loop
 	for (uint32_t a = 0; a < iter; ++a)
 	{
@@ -856,10 +857,18 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &c
 	cout << "construct problem: pose\n";
 	Problem problem;
 
-	auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-		(new PoseCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
-	problem.AddResidualBlock(cost_function, NULL, pose);
-
+	if (isReMin && curiter > 0)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		problem.AddResidualBlock(cost_function, NULL, pose);
+	}
+	else
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		problem.AddResidualBlock(cost_function, NULL, pose);
+	}
 	if (curFrame > 0)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<MovementSofter, ceres::CENTRAL, POSPARAM_NUM, POSPARAM_NUM>
@@ -885,10 +894,18 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const CScan& 
 	Problem problem;
 	cout << "construct problem: SHAPE\n";
 
-	auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-		(new ShapeCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
-	problem.AddResidualBlock(cost_function, NULL, shape);
-
+	if (isReMin)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
+	else
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
 	if (curFrame > 0)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
@@ -1391,6 +1408,8 @@ void fitMesh::mainProcess()
 	if (mode)//only once
 		return;
 	const bool useRE = yesORno("use RE version of fit?");
+	if (useRE)
+		isReMin = yesORno("use ReMin for aloowing shift?");
 	int leastframe = inputNumber("at least fit to which frame?", 0);
 	while (curFrame < leastframe || yesORno("fit next frame?"))
 	{
