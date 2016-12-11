@@ -817,8 +817,10 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &c
 
 	if (isReShift && curiter > 0)
 	{
-		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(new PoseCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorPredReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostFunctorPredReShift(&shapepose, curMParam, predMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		/*auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));*/
 		problem.AddResidualBlock(cost_function, NULL, pose);
 	}
 	else
@@ -860,8 +862,8 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const CScan& 
 	}
 	else
 	{
-		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
 	if (curFrame > 0)

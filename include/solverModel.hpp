@@ -309,22 +309,27 @@ public:
 		SimpleTimer timer;
 		const auto pts = shapepose_->getModelByPose(basePts, pose);
 
-		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
 		for (uint32_t j = 0; j < ptcount; ++j)
 		{
 			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length() * weights[j];
-			if (flags[idx])//choose min
-				residual[idx] = std::min(residual[idx], val);
+			const double val = (scanCache[j] - pts[idx]).length();
+			if (finwgt[idx] > 0)//choose min
+			{
+				if (val < residual[idx])
+				{
+					residual[idx] = val;
+					finwgt[idx] = weights[j];
+				}
+			}
 			else
 			{
 				residual[idx] = val;
-				flags[idx] = 1;
+				finwgt[idx] = weights[j];
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			if (!flags[j])
-				residual[j] = 0;
+			residual[j] *= finwgt[j];
 
 		timer.Stop();
 		runcnt++;
@@ -353,23 +358,28 @@ public:
 		SimpleTimer timer;
 		const auto pts = shapepose_->getModelFast(shape, pose.data());
 
-		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
 		for (uint32_t j = 0; j < ptcount; ++j)
 		{
 			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length() * weights[j];
-			if (flags[idx])//choose min
-				residual[idx] = std::min(residual[idx], val);
+			const double val = (scanCache[j] - pts[idx]).length();
+			if (finwgt[idx] > 0)//choose min
+			{
+				if (val < residual[idx])
+				{
+					residual[idx] = val;
+					finwgt[idx] = weights[j];
+				}
+			}
 			else
 			{
 				residual[idx] = val;
-				flags[idx] = 1;
+				finwgt[idx] = weights[j];
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			if (!flags[j])
-				residual[j] = 0;
-
+			residual[j] *= finwgt[j];
+		
 		timer.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
@@ -377,50 +387,112 @@ public:
 	}
 };
 
-struct PoseRegularizer
+struct PoseCostFunctorPredReShift
 {
 protected:
-	int dim_;
-	double weight_;
+	const CShapePose *shapepose_;
+	std::vector<float> weights;
+	std::vector<uint32_t> idxMapper;
+	uint32_t ptcount;
+	miniBLAS::VertexVec scanCache;
+	const VertexVec basePts;
 public:
-	PoseRegularizer(double weight, int dim) :weight_(weight), dim_(dim)
+	PoseCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
+		: shapepose_(shapepose), idxMapper(idxMapper_), weights(weights_), basePts(shapepose_->getBaseModel(modelParam.shape.data())),
+		scanCache(scanCache_), ptcount(ptcount_)
 	{
-		//cout<<"the weight:"<<weight_<<endl;
+		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+		for (uint32_t j = 0; j < ptcount; ++j)
+			flags[idxMapper[j]] = 1;
+		
+		const VertexVec predVec = shapepose->getModelByPose(basePts, predParam.pose.data());
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+			if (!flags[j])
+			{
+				ptcount++;
+				idxMapper.push_back(j);
+				scanCache.push_back(predVec[j]);
+				weights.push_back(0.15f);
+			}
 	}
-	template <typename T>
-	bool operator ()(const T* const w, T* residual) const
+	bool operator() (const double* pose, double* residual) const
 	{
-		//        T sum=T(0);
-		for (int i = 0; i < dim_; i++)
+		SimpleTimer timer;
+		const auto pts = shapepose_->getModelByPose(basePts, pose);
+		float finwgt[EVALUATE_POINTS_NUM];
+		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
+		for (uint32_t j = 0; j < ptcount; ++j)
 		{
-			//            sum += T(w[i]);
-			residual[i] = weight_*T(w[i]);
+			const auto idx = idxMapper[j];
+			const double val = (scanCache[j] - pts[idx]).length();
+			if (val < residual[idx])
+			{
+				residual[idx] = val;
+				finwgt[idx] = weights[j];
+			}
 		}
-		//        residual[0]=weight_*sqrt(sum);
-		return true;
-	}
-};
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+			residual[j] *= finwgt[j];
 
-struct ShapeRegularizer
+		timer.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
+		return true;
+	};
+};
+struct ShapeCostFunctorPredReShift
 {
 protected:
-	int dim_;
-	double weight_;
+	const CShapePose *shapepose_;
+	const ModelParam::PoseParam pose;
+	std::vector<float> weights;
+	std::vector<uint32_t> idxMapper;
+	uint32_t ptcount;
+	miniBLAS::VertexVec scanCache;
 public:
-	ShapeRegularizer(double weight, int dim) :weight_(weight), dim_(dim)
+	ShapeCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
+			const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
+		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), weights(weights_), scanCache(scanCache_), ptcount(ptcount_)
 	{
-		//cout<<"the weight:"<<weight_<<endl;
+		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+		for (uint32_t j = 0; j < ptcount; ++j)
+			flags[idxMapper[j]] = 1;
+
+		const VertexVec predVec = shapepose->getModelFast(predParam.shape.data(), pose.data());
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+			if (!flags[j])
+			{
+				ptcount++;
+				idxMapper.push_back(j);
+				scanCache.push_back(predVec[j]);
+				weights.push_back(0.15f);
+			}
 	}
-	template <typename T>
-	bool operator ()(const T* const w, T* residual) const
+	bool operator() (const double* shape, double* residual) const
 	{
-		for (int i = 0; i < dim_; i++)
+		SimpleTimer timer;
+		const auto pts = shapepose_->getModelFast(shape, pose.data());
+		float finwgt[EVALUATE_POINTS_NUM];
+		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
+		for (uint32_t j = 0; j < ptcount; ++j)
 		{
-			//            sum += T(w[i]);
-			residual[i] = weight_*T(w[i]);
+			const auto idx = idxMapper[j];
+			const double val = (scanCache[j] - pts[idx]).length();
+			if (val < residual[idx])
+			{
+				residual[idx] = val;
+				finwgt[idx] = weights[j];
+			}
 		}
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+			residual[j] *= finwgt[j];
+
+		timer.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
 		return true;
-	}
+	};
 };
 
 struct MovementSofter
