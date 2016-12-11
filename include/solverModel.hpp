@@ -455,3 +455,88 @@ public:
 		return true;
 	}
 };
+
+struct PNCalc
+{
+	template <typename T>
+	static T calcute(const T* x, const uint32_t i)
+	{
+		const T val = T(i);
+		return x[0] + x[1] * val + x[2] * ceres::pow(val, 2);
+	}
+};
+struct PSCalc
+{
+	template <typename T>
+	static T calcute(const T* x, const uint32_t i)
+	{
+		const T val = T(i);
+		return x[0] + x[1] * val + x[2] * ceres::sin(val + x[3]);
+	}
+};
+template<typename C>
+struct ParamPredictor
+{
+protected:
+	const std::vector<ModelParam>& params;
+	const uint8_t idx;
+public:
+	using Calc = C;
+	ParamPredictor(const std::vector<ModelParam>& params_, const uint8_t idx_) :params(params_), idx(idx_) { }
+	template <typename T>
+	bool operator ()(const T* const x, T* residual) const
+	{
+		const uint8_t step = 2;
+		const uint32_t framesize = params.size();
+		const uint32_t maxcnt = calcCount(framesize);
+		for (uint32_t i = framesize - 1, j = 0; j < maxcnt; i--, j++)
+		{
+			const uint32_t level = j / step;
+			const T weight = T(1.0) / T(std::pow(level, level));//1/n^n
+			const T obj = C::calcute(x, i);
+			residual[j] = weight * (T(params[i].pose[idx]) - obj);
+		}
+		return true;
+	}
+	static uint32_t calcCount(const uint32_t frames)
+	{
+		return std::min(frames, (uint32_t)16);
+	}
+};
+template<typename C>
+struct ParamSofter
+{
+protected:
+	const std::vector<ModelParam>& params;
+	const uint8_t idx;
+	const uint32_t objframe;
+public:
+	using Calc = C;
+	ParamSofter(const std::vector<ModelParam>& params_, const uint32_t frame_, const uint8_t idx_) :params(params_), idx(idx_), objframe(frame_) { }
+	template <typename T>
+	bool operator ()(const T* const x, T* residual) const
+	{
+		const uint32_t maxframe = std::min(uint32_t(params.size() - 1), objframe + 8);
+		const uint32_t minframe = objframe >= 8 ? (objframe - 8) : 0;
+
+		for (uint32_t i = minframe, j = 0; i < maxframe; i++, j++)
+		{
+			const uint32_t level = 1 + (objframe >= i ? (objframe - i) : (i - objframe));
+			const T weight = T(1.0) / T(std::pow(level, level));//1/n^n
+			const T obj = C::calcute(x, i);
+			residual[j] = weight * (T(params[i].pose[idx]) - obj);
+		}
+		return true;
+	}
+	static uint32_t calcCount(const uint32_t frames, const uint32_t obj)
+	{
+		const uint32_t maxframe = std::min(frames - 1, obj + 8);
+		const uint32_t minframe = obj >= 8 ? (obj - 8) : 0;
+		return maxframe - minframe;
+	}
+};
+using PosePredictor = ParamPredictor<PNCalc>;
+using PoseAniSofter = ParamSofter<PNCalc>;
+using JointPredictor = ParamPredictor<PSCalc>;
+using JointAniSofter = ParamSofter<PSCalc>;
+

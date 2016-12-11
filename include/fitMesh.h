@@ -10,8 +10,8 @@
 
 using arColIS = std::vector<int8_t>;
 
-void printMat(const char *str, arma::mat m);
-void printMatAll(const char *str, arma::mat m);
+void printMat(const char *str, const arma::mat& m);
+void printMatAll(const char *str, const arma::mat& m);
 
 ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
 {
@@ -119,7 +119,7 @@ public:
 	bool isFastCost = true;
 	bool isRayTrace = false;
 	bool isAngWgt = true;
-	bool isReMin = false;
+	bool isReShift = false;
 	bool isShFix = true;
 
 	uint32_t nSamplePoints;
@@ -136,6 +136,7 @@ public:
 	void watch();
 	void watch(const uint32_t frameCount);
 private:
+	double npp[POSPARAM_NUM][6];
 	double scale;
 	arColIS isValidNN_;
 	std::vector<float> weights;
@@ -164,16 +165,18 @@ private:
 	void DirectRigidAlign(CScan& scan);
 	void rigidAlignTemplate2ScanLandmarks();
 
+	struct FitParam
+	{
+		bool isSPose, isSShape;
+		double anglim;
+		ceres::Solver::Options option;
+	};
 	/** @brief fitShapePose
 	 ** Fit the model to the scan by pose & shape
-	 ** @param -paramer  a function to determine solve params by iteration
-	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
-	 **					cur_iter, all_iter, angle_limit ==> angle_limit, isSolvePose, isSolveShape
+	 ** @param -fitparams  a vector contains params needed for fit process
 	 **/
-	void fitShapePose(const CScan& scan, const uint32_t iter, 
-		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
-	void fitShapePoseRe(const CScan& scan, const uint32_t iter,
-		std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	void fitShapePose(const CScan& scan, const std::vector<FitParam>& fitparams);
+	void fitShapePoseRe(const CScan& scan, const std::vector<FitParam>& fitparams);
 	/** @brief fitFinal
 	 ** Fit the model to the whole scan series by pose & shape
 	 ** @param -paramer  a function to determine solve params by iteration
@@ -189,6 +192,9 @@ private:
 	void solveAllShape(const ceres::Solver::Options& options, const double angLim);
 	void solveAllShapeRe(const ceres::Solver::Options& options, const double angLim);
 	
+	void predictPose();
+	void predSoftPose(const bool solveGlobal);
+
 	void buildModelColor();
 
 	/** @brief nnFilter
