@@ -64,6 +64,7 @@ struct CTemplate : public ModelBase
 	void updPoints(miniBLAS::VertexVec&& pts);
 	void calcFaces();
 	void calcNormals();
+	void calcNormalsEx();
 	std::vector<pcl::Vertices> ShowMesh(pcl::PointCloud<pcl::PointXYZRGB>& cloud);
 };
 

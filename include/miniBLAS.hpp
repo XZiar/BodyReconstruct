@@ -256,7 +256,7 @@ public:
 	{
 		return operator%(*this);
 	}
-	Vertex &norm()
+	Vertex &do_norm()
 	{
 	#ifdef USE_SSE4
 		const __m128 ans = _mm_sqrt_ps(_mm_dp_ps(float_dat, float_dat, 0b01110111));

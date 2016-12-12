@@ -171,7 +171,7 @@ protected:
 	}
 	static std::vector<float> buildCache(const arColIS& isValidNN, const std::vector<float>& wgts = std::vector<float>())
 	{
-		std::vector<float> weights(EVALUATE_POINTS_NUM, 0.35f);
+		std::vector<float> weights(EVALUATE_POINTS_NUM, 0.2f);
 		const bool isWgt = (wgts.size() > 0);
 		for (uint32_t a = 0, b = 0; a < EVALUATE_POINTS_NUM; ++a)
 		{
@@ -519,7 +519,7 @@ protected:
 	const ModelParam::ShapeParam lastshape;
 	const double weight;
 public:
-	ShapeSofter(const ModelParam& modelParam, const double w) :lastshape(modelParam.shape), weight(w) { }
+	ShapeSofter(const ModelParam& modelParam, const double err) :lastshape(modelParam.shape), weight(sqrt(err / SHAPEPARAM_NUM)) { }
 	bool operator()(const double* shape, double* residual) const
 	{
 		for (uint32_t i = 0; i < SHAPEPARAM_NUM; ++i)
@@ -594,7 +594,7 @@ public:
 		for (uint32_t i = minframe, j = 0; i < maxframe; i++, j++)
 		{
 			const uint32_t level = 1 + (objframe >= i ? (objframe - i) : (i - objframe));
-			const T weight = T(1.0) / T(std::pow(level, level));//1/n^n
+			const T weight = T(1.0) / T(std::pow(2, level));//1/2^n
 			const T obj = C::calcute(x, i);
 			residual[j] = weight * (T(params[i].pose[idx]) - obj);
 		}

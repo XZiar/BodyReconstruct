@@ -116,11 +116,10 @@ void CTemplate::init(const arma::mat& p, const arma::mat& f)
 	vFaces.resize(nFaces);
 	faceMap.resize(nPoints, UINT32_MAX);
 	const double *px = faces.memptr(), *py = px + nFaces, *pz = py + nFaces;
-	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
+	for (uint32_t i = 0; i < nFaces; ++i)
 	{
 		auto& objidx = vFaces[i].pidx;
 		objidx.assign(int32_t(px[i]), int32_t(py[i]), int32_t(pz[i]), 65536);
-
 		auto& tx = faceMap[objidx.x];
 		if (tx == UINT32_MAX)
 			tx = i;
@@ -154,13 +153,12 @@ void CTemplate::updPoints(miniBLAS::VertexVec&& pts)
 
 void CTemplate::calcFaces()
 {
-	for (uint32_t i = 0, j = 0; i < nFaces; ++i, j += 3)
+	for (auto& obj : vFaces)
 	{
-		auto& obj = vFaces[i];
 		obj.p0 = vPts[obj.pidx.x];
 		obj.axisu = vPts[obj.pidx.y] - obj.p0;
 		obj.axisv = vPts[obj.pidx.z] - obj.p0;
-		obj.norm = (obj.axisu * obj.axisv).norm();
+		obj.norm = (obj.axisu * obj.axisv).do_norm();
 	}
 }
 
@@ -169,6 +167,20 @@ void CTemplate::calcNormals()
 	vNorms.resize(nPoints); 
 	for (uint32_t i = 0; i < nPoints; i++)
 		vNorms[i] = vFaces[faceMap[i]].norm;
+}
+void CTemplate::calcNormalsEx()
+{
+	vNorms = VertexVec(nPoints, Vertex(0, 0, 0, 0));
+	for (const auto& f : vFaces)
+	{
+		vNorms[f.pidx.x] += f.norm;
+		vNorms[f.pidx.y] += f.norm;
+		vNorms[f.pidx.z] += f.norm;
+	}
+	for (auto& n : vNorms)
+	{
+		n.do_norm();
+	}
 }
 
 vector<pcl::Vertices> CTemplate::ShowMesh(pcl::PointCloud<pcl::PointXYZRGB>& cloud)
@@ -730,7 +742,7 @@ void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::V
     cout<<"construct problem: pose\n";
 	Problem problem;
 
-	if (curFrame > 0 && curiter > 0)
+	if (curFrame > 3 && curiter > 0)
 	{
 		auto *cost_functionPred = new ceres::NumericDiffCostFunction<PoseCostFunctorPred, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
 			(isAngWgt ? new PoseCostFunctorPred(&shapepose, curMParam, predMParam, isValidNN, scanCache, weights) :
@@ -815,7 +827,7 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &c
 	cout << "construct problem: pose\n";
 	Problem problem;
 
-	if (isReShift && curiter > 0)
+	if (curFrame > 3 && curiter > 0)
 	{
 		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorPredReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
 			(new PoseCostFunctorPredReShift(&shapepose, curMParam, predMParam, curScan.vPts, weights, idxs, curScan.nPoints));
@@ -823,6 +835,12 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &c
 			(new PoseCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));*/
 		problem.AddResidualBlock(cost_function, NULL, pose);
 	}
+	/*else if (isReShift)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		problem.AddResidualBlock(cost_function, NULL, pose);
+	}*/
 	else
 	{
 		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
@@ -832,7 +850,7 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const CScan &c
 	if (curFrame > 0)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<MovementSofter, ceres::CENTRAL, POSPARAM_NUM, POSPARAM_NUM>
-			(new MovementSofter(modelParams.back(), lastErr));
+			(new MovementSofter(modelParams.back(), lastErr * 0.75));
 		problem.AddResidualBlock(soft_function, NULL, pose);
 	}
 	Solver::Summary summary;
@@ -862,14 +880,14 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const CScan& 
 	}
 	else
 	{
-		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorReShift(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+			(new ShapeCostFunctorRe(&shapepose, curMParam, curScan.vPts, weights, idxs, curScan.nPoints));
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
 	if (curFrame > 0)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
-			(new ShapeSofter(modelParams.back(), sqrt(lastErr / SHAPEPARAM_NUM)));
+			(new ShapeSofter(modelParams.back(), lastErr / 2));
 		problem.AddResidualBlock(soft_function, NULL, shape);
 	}
 	Solver::Summary summary;
@@ -904,6 +922,8 @@ void fitMesh::fitFinal(const uint32_t iter, std::function<std::tuple<double, boo
 	options.minimizer_progress_to_stdout = true;
 	options.max_num_line_search_direction_restarts = 10;
 	options.max_num_consecutive_invalid_steps = 10;
+	options.max_num_iterations = 60;
+	options.use_nonmonotonic_steps = true;
 
 	for (auto& sc : scanFrames)
 		sc.nntree.MAXDist2 = 3e3f;
@@ -1086,7 +1106,7 @@ void fitMesh::predSoftPose(const bool solveGlobal)
 	option.minimizer_type = ceres::TRUST_REGION;
 	option.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
 	option.linear_solver_type = ceres::DENSE_QR;
-	option.minimizer_progress_to_stdout = true;
+	option.minimizer_progress_to_stdout = false;
 	option.max_num_line_search_direction_restarts = 10;
 	option.max_num_consecutive_invalid_steps = 10;
 	option.use_nonmonotonic_steps = false;
@@ -1133,7 +1153,7 @@ void fitMesh::predSoftPose(const bool solveGlobal)
 	for (uint32_t a = 6; a < POSPARAM_NUM; ++a)
 		predMParam.pose[a] = JointAniSofter::Calc::calcute(npp[a], curFrame);
 	//printf("poly-n predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
-	getchar();
+	//getchar();
 }
 
 void fitMesh::raytraceCut(miniBLAS::NNResult& res) const
@@ -1181,7 +1201,21 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 {
 	tempbody.updPoints(shapepose.getModelFast(mPar.shape.data(), mPar.pose.data()));
 	tempbody.calcFaces();
-	tempbody.calcNormals();
+	tempbody.calcNormalsEx();
+	if(false)
+	{
+		const auto normex = tempbody.vNorms;
+		tempbody.calcNormals();
+		const auto norm = tempbody.vNorms;
+		tempbody.vNorms = normex;
+		for (uint32_t a = 0; a < tempbody.nPoints; ++a)
+		{
+			const auto thecos = norm[a] % normex[a];
+			const auto ang = 180 * (std::acos(thecos) / 3.1415926);
+			printf("norm %d, ang: %f\n", a, ang);
+		}
+		getchar();
+	}
 
 	SimpleTimer timer;
 	//dist^2 in fact
@@ -1263,7 +1297,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 {
 	tempbody.updPoints(shapepose.getModelFast(mPar.shape.data(), mPar.pose.data()));
 	tempbody.calcFaces();
-	tempbody.calcNormals();
+	tempbody.calcNormalsEx();
 	tempbody.nntree.init(tempbody.vPts, tempbody.vNorms, tempbody.nPoints);
 
 	uint32_t sumVNN = 0;
@@ -1357,7 +1391,7 @@ void fitMesh::buildModelColor()
 			auto& scan = scanFrames[a];
 			tempbody.updPoints(shapepose.getModelFast(mp.shape.data(), mp.pose.data()));
 			tempbody.calcFaces();
-			tempbody.calcNormals();
+			tempbody.calcNormalsEx();
 
 			miniBLAS::NNResult nnres(tempbody.nPoints, scan.nntree.PTCount());
 			scan.nntree.MAXDist2 = 1e3f;
@@ -1443,6 +1477,7 @@ void fitMesh::mainProcess()
 		option.minimizer_progress_to_stdout = true;
 		option.max_num_line_search_direction_restarts = 10;
 		option.max_num_consecutive_invalid_steps = 10;
+		option.max_num_iterations = 60;
 	}
 	scanFrames.clear();
 	setTitle("Reconstructing...");
@@ -1462,8 +1497,9 @@ void fitMesh::mainProcess()
 				v.addText("frame0", 100, 0, 12, 1, 0, 0, "frame");
 			});
 		}
+		option.use_nonmonotonic_steps = true;
 		for (uint32_t a = 0; a < 10; ++a)
-			fitparams.push_back(FitParam{ true, a > 0, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
+			fitparams.push_back(FitParam{ true, true, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
 		fitShapePose(firstScan, fitparams);
 		modelParams.push_back(curMParam);
 		bakMParam = curMParam;
@@ -1478,14 +1514,15 @@ void fitMesh::mainProcess()
 	int leastframe = inputNumber("at least fit to which frame?", 0);
 	{
 		//prepare fit params
+		//option.use_nonmonotonic_steps = false;
 		fitparams.clear();
 		const uint32_t totaliter = 4;
 		for (uint32_t a = 0; a < totaliter; ++a)
 		{
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
 			const double angLim = angleLimit * (1 - std::log(0.65 + 0.35 * a / totaliter));
-			const uint32_t obj_iter = totaliter - 2;
-			fitparams.push_back(FitParam{ true, a == obj_iter, angLim, option });
+			option.use_nonmonotonic_steps = (a == totaliter - 1);
+			fitparams.push_back(FitParam{ true, totaliter - a <= 2, angLim, option });
 		}
 	}
 	memset(npp, 0x0, sizeof(npp));
@@ -1737,7 +1774,7 @@ void fitMesh::showFrame(const uint32_t frame)
 		return;
 	tempbody.updPoints(shapepose.getModelFast(modelParams[frame].shape.data(), modelParams[frame].pose.data()));
 	tempbody.calcFaces();
-	tempbody.calcNormals();
+	tempbody.calcNormalsEx();
 	printFrame(frame);
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 	if (isShowScan)
