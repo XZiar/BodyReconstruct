@@ -1,5 +1,12 @@
 #pragma once
 
+#ifndef __AVX__
+#  define __AVX__ 1
+#endif
+#ifdef __AVX2__
+#  define __FMA__ 1
+#endif
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
@@ -24,6 +31,11 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/visualization/cloud_viewer.h>
+#if defined(_MSC_VER)
+#  define _j0 _j0
+#  define _j1 _j1
+#  define _jn _jn
+#endif
 #include <ceres/ceres.h>
 
 using atomic_uint32_t = std::atomic_uint_least32_t;

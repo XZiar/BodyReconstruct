@@ -30,7 +30,7 @@ public:
 	void searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const;
 	void search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
 	void searchOnAngle(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angle) const;
-	void searchOnAnglePan(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angleLim) const;
+	void searchOnAnglePan(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angleLim, const float d2threshold = 1.25f/*1.12^2*/) const;
 	uint32_t PTCount() const { return ptCount + 7; };
 };
 
@@ -389,7 +389,8 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 }
 
 template<typename CHILD>
-void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angLim) const
+void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angLim, 
+	const float d2threshold) const
 {
 	const uint32_t count = ret.objSize;
 	int *idxs = ret.idxs; float *dists = ret.dists;
@@ -415,24 +416,28 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 
 		for (uint32_t b = part.size() / 8; b--; pID += 8)
 		{
-			//calculate 4 vector represent 8 (point-Obj ---> point-Base)
-			const __m256 vn01 = _mm256_load_ps(pNBase + 0), a1 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 0));
-			const __m256 vn23 = _mm256_load_ps(pNBase + 8), a2 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 8));
-			const __m256 vn45 = _mm256_load_ps(pNBase + 16), a3 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 16));
-			const __m256 vn67 = _mm256_load_ps(pNBase + 32), a4 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 24));
+			const __m256 cos8 = _mm256_blend_ps
+			(
+				_mm256_blend_ps(
+					_mm256_dp_ps(_mm256_load_ps(pNBase + 0 ), mNorm, 0x71)/*c1,0,0,0;c2,0,0,0*/,
+					_mm256_dp_ps(_mm256_load_ps(pNBase + 8 ), mNorm, 0x72)/*0,c3,0,0;0,c4,0,0*/,
+					0x22)/*c1,c3,00;c2,c4,00*/,
+				_mm256_blend_ps(
+					_mm256_dp_ps(_mm256_load_ps(pNBase + 16), mNorm, 0x74)/*0,0,c5,0;0,0,c6,0*/,
+					_mm256_dp_ps(_mm256_load_ps(pNBase + 32), mNorm, 0x78)/*0,0,0,c7;0,0,0,c8*/,
+					0x88)/*00,c5,c7;00,c6,c8*/,
+				0b11001100
+			)/*c1,c3,c5,c7;c2,c4,c6,c8*/;
 
+			//calculate 4 vector represent 8 (point-Obj ---> point-Base)
+			const __m256 a1 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 0));
+			const __m256 a2 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 8));
+			const __m256 a3 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 16));
+			const __m256 a4 = _mm256_sub_ps(mObj, _mm256_load_ps(pBase + 24));
 			//prefetch
 			_mm_prefetch((const char*)(pBase += 32), _MM_HINT_T1);
 			_mm_prefetch((const char*)(pNBase += 32), _MM_HINT_T1);
 
-			const __m256 cos8 = _mm256_blend_ps
-			(
-				_mm256_blend_ps(_mm256_dp_ps(vn01, mNorm, 0x71)/*c1,000;c2,000*/, _mm256_dp_ps(vn23, mNorm, 0x72)/*0,c3,00;0,c4,00*/,
-					0x22)/*c1,c3,00;c2,c4,00*/,
-				_mm256_blend_ps(_mm256_dp_ps(vn45, mNorm, 0x74)/*00,c5,0;00,c6,0*/, _mm256_dp_ps(vn67, mNorm, 0x78)/*000,c7;000,c8*/,
-					0x88)/*00,c5,c7;00,c6,c8*/,
-				0b11001100
-			)/*c1,c3,c5,c7;c2,c4,c6,c8*/;
 			const __m256 cosRes = _mm256_cmp_ps(cos8, mincos, _CMP_GE_OS);
 			if (!_mm256_movemask_ps(cosRes))//angle all unsatisfied
 				continue;
@@ -497,7 +502,7 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 		{
 			*idxs++ = IDX;
 			ret.mthcnts[IDX]++;
-			DIST *= 1.25f;//1.12*1.12
+			DIST *= d2threshold;
 			if (ret.mdists[IDX] > DIST)
 				ret.mdists[IDX] = DIST;
 		}

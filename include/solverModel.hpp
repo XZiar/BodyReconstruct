@@ -215,9 +215,9 @@ protected:
 	const VertexVec basePts;
 public:
 	PoseCostFunctorRe(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
 		: shapepose_(shapepose), idxMapper(idxMapper_), basePts(shapepose_->getBaseModel(modelParam.shape.data())),
-		scanCache(scanCache_), ptcount(ptcount_)
+		scanCache(scanCache_), ptcount(scanCache_.size())
 	{
 		weights.reserve(weights_.size());
 		for (const auto w : weights_)
@@ -238,7 +238,6 @@ public:
 			obj.do_sqrt();
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
 			residual[j] = pTmp[j];
-
 		timer.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
@@ -257,8 +256,8 @@ protected:
 	const miniBLAS::VertexVec& scanCache;
 public:
 	ShapeCostFunctorRe(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
-		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), scanCache(scanCache_), ptcount(ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
+		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), scanCache(scanCache_), ptcount(scanCache_.size())
 	{
 		weights.reserve(weights_.size());
 		for (const auto w : weights_)
@@ -287,21 +286,54 @@ public:
 	}
 };
 
+static miniBLAS::VertexVec DataFilter(const miniBLAS::VertexVec& ptin, const std::vector<float>& weights)
+{
+	const uint32_t count = ptin.size();
+	miniBLAS::VertexVec ptout;
+	for (uint32_t a = 0; a < count; ++a)
+	{
+		ptout.push_back(ptin[a]);
+		ptout.back().w = weights[a];
+	}
+	return ptout;
+}
+static miniBLAS::VertexVec DataFilter(const miniBLAS::VertexVec& ptin, const std::vector<float>& weights,
+	const miniBLAS::VertexVec& fillpt, const float fillw, std::vector<uint32_t>& idxs)
+{
+	int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+	const uint32_t count = ptin.size();
+	miniBLAS::VertexVec ptout;
+	for (uint32_t a = 0; a < count; ++a)
+	{
+		ptout.push_back(ptin[a]);
+		ptout.back().w = weights[a];
+		flags[idxs[a]] = 1;
+	}
+	for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+	{
+		if (!flags[j])
+		{
+			ptout.push_back(fillpt[j]);
+			ptout.back().w = fillw;
+			idxs.push_back(j);
+		}
+	}
+	return ptout;
+}
 struct PoseCostFunctorReShift
 {
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
-	std::vector<float> weights;
-	const std::vector<uint32_t> idxMapper;
-	const uint32_t ptcount;
-	const miniBLAS::VertexVec& scanCache;
 	const VertexVec basePts;
+	std::vector<uint32_t> shiftParam;
+	miniBLAS::VertexVec scanCache;
+	uint32_t count;
 public:
 	PoseCostFunctorReShift(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
-		: shapepose_(shapepose), idxMapper(idxMapper_), weights(weights_), basePts(shapepose_->getBaseModel(modelParam.shape.data())),
-		scanCache(scanCache_), ptcount(ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
+		: shapepose_(shapepose), basePts(shapepose_->getBaseModel(modelParam.shape.data())), shiftParam(idxMapper_),
+		scanCache(DataFilter(scanCache_, weights_)), count(idxMapper_.size())
 	{
 	}
 	bool operator() (const double* pose, double* residual) const
@@ -310,22 +342,16 @@ public:
 		const auto pts = shapepose_->getModelByPose(basePts, pose);
 
 		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
-		for (uint32_t j = 0; j < ptcount; ++j)
+		memset(residual, 0x7f, sizeof(double) * EVALUATE_POINTS_NUM);
+		uint32_t i = 0;
+		for (const auto& obj : scanCache)
 		{
-			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length();
-			if (finwgt[idx] > 0)//choose min
-			{
-				if (val < residual[idx])
-				{
-					residual[idx] = val;
-					finwgt[idx] = weights[j];
-				}
-			}
-			else
+			const uint32_t idx = shiftParam[i++];
+			const double val = (obj - pts[idx]).length();
+			if (val < residual[idx])
 			{
 				residual[idx] = val;
-				finwgt[idx] = weights[j];
+				finwgt[idx] = obj.w;
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
@@ -343,14 +369,13 @@ protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const ModelParam::PoseParam pose;
-	std::vector<float> weights;
-	const std::vector<uint32_t> idxMapper;
-	const uint32_t ptcount;
-	const miniBLAS::VertexVec& scanCache;
+	std::vector<uint32_t> shiftParam;
+	miniBLAS::VertexVec scanCache;
+	uint32_t count;
 public:
 	ShapeCostFunctorReShift(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
-		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), weights(weights_), scanCache(scanCache_), ptcount(ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
+		: shapepose_(shapepose), pose(modelParam.pose), shiftParam(idxMapper_), scanCache(DataFilter(scanCache_, weights_)), count(idxMapper_.size())
 	{
 	}
 	bool operator() (const double* shape, double* residual) const
@@ -359,22 +384,16 @@ public:
 		const auto pts = shapepose_->getModelFast(shape, pose.data());
 
 		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
-		for (uint32_t j = 0; j < ptcount; ++j)
+		memset(residual, 0x7f, sizeof(double) * EVALUATE_POINTS_NUM);
+		uint32_t i = 0;
+		for (const auto& obj : scanCache)
 		{
-			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length();
-			if (finwgt[idx] > 0)//choose min
-			{
-				if (val < residual[idx])
-				{
-					residual[idx] = val;
-					finwgt[idx] = weights[j];
-				}
-			}
-			else
+			const uint32_t idx = shiftParam[i++];
+			const double val = (obj - pts[idx]).length();
+			if (val < residual[idx])
 			{
 				residual[idx] = val;
-				finwgt[idx] = weights[j];
+				finwgt[idx] = obj.w;
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
@@ -391,30 +410,18 @@ struct PoseCostFunctorPredReShift
 {
 protected:
 	const CShapePose *shapepose_;
-	std::vector<float> weights;
+	const VertexVec basePts;
+	miniBLAS::VertexVec scanCache;
 	std::vector<uint32_t> idxMapper;
 	uint32_t ptcount;
-	miniBLAS::VertexVec scanCache;
-	const VertexVec basePts;
 public:
 	PoseCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
-		: shapepose_(shapepose), idxMapper(idxMapper_), weights(weights_), basePts(shapepose_->getBaseModel(modelParam.shape.data())),
-		scanCache(scanCache_), ptcount(ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
+		: shapepose_(shapepose), basePts(shapepose_->getBaseModel(modelParam.shape.data())), idxMapper(idxMapper_)
 	{
-		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
-		for (uint32_t j = 0; j < ptcount; ++j)
-			flags[idxMapper[j]] = 1;
-		
 		const VertexVec predVec = shapepose->getModelByPose(basePts, predParam.pose.data());
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			if (!flags[j])
-			{
-				ptcount++;
-				idxMapper.push_back(j);
-				scanCache.push_back(predVec[j]);
-				weights.push_back(0.15f);
-			}
+		scanCache = DataFilter(scanCache_, weights_, predVec, 0.15f, idxMapper);
+		ptcount = scanCache.size();
 	}
 	bool operator() (const double* pose, double* residual) const
 	{
@@ -422,19 +429,20 @@ public:
 		const auto pts = shapepose_->getModelByPose(basePts, pose);
 		float finwgt[EVALUATE_POINTS_NUM];
 		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
-		for (uint32_t j = 0; j < ptcount; ++j)
+		uint32_t i = 0;
+		for (const auto& obj : scanCache)
 		{
-			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length();
+			const uint32_t idx = idxMapper[i++];
+			const double val = (obj - pts[idx]).length();
 			if (val < residual[idx])
 			{
 				residual[idx] = val;
-				finwgt[idx] = weights[j];
+				finwgt[idx] = obj.w;
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
 			residual[j] *= finwgt[j];
-
+		
 		timer.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
@@ -446,28 +454,17 @@ struct ShapeCostFunctorPredReShift
 protected:
 	const CShapePose *shapepose_;
 	const ModelParam::PoseParam pose;
-	std::vector<float> weights;
 	std::vector<uint32_t> idxMapper;
-	uint32_t ptcount;
 	miniBLAS::VertexVec scanCache;
+	uint32_t ptcount;
 public:
 	ShapeCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
-			const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_, const uint32_t ptcount_)
-		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), weights(weights_), scanCache(scanCache_), ptcount(ptcount_)
+		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
+		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_)
 	{
-		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
-		for (uint32_t j = 0; j < ptcount; ++j)
-			flags[idxMapper[j]] = 1;
-
 		const VertexVec predVec = shapepose->getModelFast(predParam.shape.data(), pose.data());
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			if (!flags[j])
-			{
-				ptcount++;
-				idxMapper.push_back(j);
-				scanCache.push_back(predVec[j]);
-				weights.push_back(0.15f);
-			}
+		scanCache = DataFilter(scanCache_, weights_, predVec, 0.15f, idxMapper);
+		ptcount = scanCache.size();
 	}
 	bool operator() (const double* shape, double* residual) const
 	{
@@ -475,14 +472,15 @@ public:
 		const auto pts = shapepose_->getModelFast(shape, pose.data());
 		float finwgt[EVALUATE_POINTS_NUM];
 		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
-		for (uint32_t j = 0; j < ptcount; ++j)
+		uint32_t i = 0;
+		for (const auto& obj : scanCache)
 		{
-			const auto idx = idxMapper[j];
-			const double val = (scanCache[j] - pts[idx]).length();
+			const uint32_t idx = idxMapper[i++];
+			const double val = (obj - pts[idx]).length();
 			if (val < residual[idx])
 			{
 				residual[idx] = val;
-				finwgt[idx] = weights[j];
+				finwgt[idx] = obj.w;
 			}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
@@ -494,6 +492,7 @@ public:
 		return true;
 	};
 };
+
 
 struct MovementSofter
 {
