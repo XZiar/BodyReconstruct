@@ -125,6 +125,8 @@ using PtrModSmooth = std::shared_ptr<ModelSmooth>;
 class CMesh
 {
 public:
+	static uint64_t functime[8];
+	static uint32_t funccount[8];
 	constexpr static uint32_t mJointNumber = POSPARAM_NUM - 6;
 	constexpr static uint32_t MotionMatCnt = mJointNumber + 1;
 	using MotionMat = std::array<miniBLAS::SQMat4x4, MotionMatCnt>;
@@ -135,6 +137,7 @@ public:
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
 		modsmooth.reset(new ModelSmooth());
+		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
 	CMesh(const CMesh& aMesh) { *this = aMesh; };
 	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
@@ -272,15 +275,19 @@ protected:
 			exit(-1);
 		}
 	}
+	static const uint8_t idxmap[14][3];
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
 
 
 	miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
-	miniBLAS::VertexVec minWgtMat;
-	const miniBLAS::Vertex *theMinWgtMat = nullptr;
-	std::array<miniBLAS::Vertex, 14> minEleSum;
+	struct ShapeJointParam
+	{
+		miniBLAS::VertexVec influence;
+		std::vector<uint32_t> idxs;
+	};
+	std::shared_ptr<std::array<ShapeJointParam, 14>> sh2jnt;
 
 	std::vector<CVector<float> >  mPoints;
 	std::vector<CVector<int> >  mPatch;

@@ -906,7 +906,7 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const VertexV
 	logger.log(summary.FullReport()).log(true, "\nshapeCost invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
 }
 
-void fitMesh::fitFinal(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer)
+void fitMesh::fitFinal(const std::vector<FitParam>& fitparams)
 {
 	isFastCost = true;
 	double err = 0;
@@ -933,22 +933,19 @@ void fitMesh::fitFinal(const uint32_t iter, std::function<std::tuple<double, boo
 	tempbody.nntree.MAXDist2 = 3e3f;
 	const bool isFitRe = yesORno("use reverse-match to solve shape?");
 
-	for (uint32_t a = 0; a < iter; ++a)
+	for (uint32_t a = 0; a < fitparams.size(); ++a)
 	{
-		const auto& pret = paramer(a, iter, angleLimit);
-		const auto angle = std::get<0>(pret);
-		if (std::get<1>(pret))//solveshape
+		const auto& pret = fitparams[a];
+		if (pret.isSPose)//solvepose
+		{
+			solveAllPose(options, pret.anglim, pret.param & 0b1);
+		}
+		else if (pret.isSShape)//solveshape
 		{
 			if (isFitRe)
-				solveAllShapeRe(options, angle);
+				solveAllShapeRe(options, pret.anglim);
 			else
-				solveAllShape(options, angle);
-			printArray("\nshape param", curMParam.shape);
-			cout << "========================================\n";
-		}
-		else//solvepose
-		{
-			solveAllPose(options, angle, std::get<2>(pret));
+				solveAllShape(options, pret.anglim);
 		}
 	}
 
@@ -1498,10 +1495,16 @@ void fitMesh::mainProcess()
 		}
 		option.use_nonmonotonic_steps = true;
 		for (uint32_t a = 0; a < 10; ++a)
-			fitparams.push_back(FitParam{ true, true, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
+			fitparams.push_back(FitParam{ true, true, 0, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
 		fitShapePose(firstScan, fitparams);
 		modelParams.push_back(curMParam);
 		bakMParam = curMParam;
+	}
+	{
+		printf("updJnt : per %lld ns\n", CMesh::functime[0] / CMesh::funccount[0]);
+		printf("rigMot : per %lld ns\n", CMesh::functime[1] / CMesh::funccount[1]);
+		printf("m2s--- : per %lld ns\n", CMesh::functime[2] / CMesh::funccount[2]);
+		printf("m2sCut : per %lld ns\n", CMesh::functime[3] / CMesh::funccount[3]);
 	}
 	if (!isVtune)
 		getchar();
@@ -1513,7 +1516,6 @@ void fitMesh::mainProcess()
 	int leastframe = inputNumber("at least fit to which frame?", 0);
 	{
 		//prepare fit params
-		//option.use_nonmonotonic_steps = false;
 		fitparams.clear();
 		const uint32_t totaliter = 4;
 		for (uint32_t a = 0; a < totaliter; ++a)
@@ -1521,7 +1523,7 @@ void fitMesh::mainProcess()
 			/*log(0.65) = -0.431 ===> ratio of angle range: 1.431-->1.0*/
 			const double angLim = angleLimit * (1 - std::log(0.65 + 0.35 * a / totaliter));
 			option.use_nonmonotonic_steps = (a == totaliter - 1);
-			fitparams.push_back(FitParam{ true, totaliter - a <= 2, angLim, option });
+			fitparams.push_back(FitParam{ true, totaliter - a <= 2, 0, angLim, option });
 		}
 	}
 	memset(npp, 0x0, sizeof(npp));
@@ -1551,12 +1553,20 @@ void fitMesh::mainProcess()
 	{
 		memset(npp, 0x0, sizeof(npp));
 		setTitle("Final Optimazing...");
-		fitFinal(9, [](const uint32_t cur, const uint32_t iter, const double aLim)
 		{
-			const bool isSolveShape = (cur % 3 != 0);
-			const double ang = aLim * (isSolveShape ? (1.2 - cur*0.05) : (1.1 - cur*0.025));
-			return make_tuple(ang, isSolveShape, cur == 3);
-		});
+			//prepare fit params
+			option.use_nonmonotonic_steps = true;
+			fitparams.clear();
+			fitparams.push_back(FitParam{ true, false, 0, angleLimit * 1.4f, option });
+			fitparams.push_back(FitParam{ true, false, 0b1, angleLimit * 1.3f, option });
+			fitparams.push_back(FitParam{ false, true, 0, angleLimit * 1.2f, option });
+			fitparams.push_back(FitParam{ false, true, 0, angleLimit * 1.1f, option });
+			fitparams.push_back(FitParam{ true, false, 0b1, angleLimit * 1.0f, option });
+			fitparams.push_back(FitParam{ false, true, 0, angleLimit * 1.0f, option });
+			fitparams.push_back(FitParam{ true, false, 0, angleLimit * 0.9f, option });
+			fitparams.push_back(FitParam{ false, true, 0, angleLimit * 0.9f, option });
+		}
+		fitFinal(fitparams);
 		printf("final optimization finished.\n");
 		modelParams.push_back(curMParam);
 		getchar();

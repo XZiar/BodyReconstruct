@@ -169,6 +169,7 @@ private:
 	struct FitParam
 	{
 		bool isSPose, isSShape;
+		uint32_t param;
 		double anglim;
 		ceres::Solver::Options option;
 	};
@@ -184,7 +185,7 @@ private:
 	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
 	 **					cur_iter, all_iter, angle_limit ==> angle_limit, solveshape OR solvepose, pred(only in solvepose)
 	 **/
-	void fitFinal(const uint32_t iter, std::function<std::tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)> paramer);
+	void fitFinal(const std::vector<FitParam>& fitparams);
 	void solvePose(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
 	void solvePoseRe(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const std::vector<uint32_t>& idxs, const double lastErr, const uint32_t curiter);
 	void solveShape(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr);

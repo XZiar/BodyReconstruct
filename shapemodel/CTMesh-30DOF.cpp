@@ -238,7 +238,11 @@ CMeshMotion& CMeshMotion::operator=(const CMeshMotion& aCopyFrom)
 }
 
 // C M E S H -------------------------------------------------------------------
+const uint8_t CMesh::idxmap[14][3] = //i0,i1,i1*3
+{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 }, { 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
 
+uint64_t CMesh::functime[8] = { 0 };
+uint32_t CMesh::funccount[8] = { 0 };
 // operator=
 void CMesh::operator=(const CMesh& aMesh)
 {
@@ -270,13 +274,11 @@ void CMesh::operator=(const CMesh& aMesh)
 
 	weightMatrix = aMesh.weightMatrix;
 	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
-	minEleSum = aMesh.minEleSum;
 
 	evecCache = aMesh.evecCache;
 	wgtMat = aMesh.wgtMat;
-	minWgtMat = aMesh.minWgtMat;
 	wMatGap = aMesh.wMatGap;
-	theMinWgtMat = &minWgtMat[0];
+	sh2jnt = aMesh.sh2jnt;
 	vPoints = aMesh.vPoints;
 	//ptSmooth = aMesh.ptSmooth;
 	//thePtSmooth = &ptSmooth[0];
@@ -297,12 +299,11 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 	mCovered = from.mCovered;
 	mExtremity = from.mExtremity;
 	mInfluencedBy = from.mInfluencedBy;
-	minEleSum = from.minEleSum;
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
 	wMatGap = from.wMatGap;
-	theMinWgtMat = from.theMinWgtMat;
+	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
 
 	if (pointsIn == nullptr)
@@ -326,12 +327,11 @@ CMesh::CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmoot
 	mCovered = from.mCovered;
 	mExtremity = from.mExtremity;
 	mInfluencedBy = from.mInfluencedBy;
-	minEleSum = from.minEleSum;
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
 	wMatGap = from.wMatGap;
-	theMinWgtMat = from.theMinWgtMat;
+	sh2jnt = from.sh2jnt;
 
 	modsmooth = msmooth;
 	vPoints = baseMesh.vPoints;
@@ -348,7 +348,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		return false;
 	}
 
-	int aXSize, aYSize, size = 4;
+	int size = 4;
 
 	CJoint Joint;
 
@@ -604,7 +604,9 @@ void CMesh::prepareData()
 {
 	//prepare weightMatrix
 	{
-		wMatGap = ((mNumPoints + 7) / 4) & 0xfffffffe;
+		wMatGap = (mNumPoints + 3) / 4;
+		if (wMatGap & 0x1)
+			wMatGap++;// at least for AVX--32byte boundary
 		wgtMat.resize(wMatGap*mJointNumber);
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
@@ -613,33 +615,40 @@ void CMesh::prepareData()
 			memcpy(&wgtMat[a*wMatGap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
 	}
 	{
-		static const uint8_t idxmap[][2] = //i0,i1
-		{ { 2,0 },{ 3,2 },{ 4,3 },{ 6,0 },{ 7,6 },{ 8,7 },{ 10,0 },{ 11,10 }, { 14,10 },{ 15,14 },{ 16,15 },{ 19,10 },{ 20,19 },{ 21,20 } };
-		minWgtMat.resize(wMatGap * 14);
-		theMinWgtMat = &minWgtMat[0];
-		memset(&minWgtMat[0], 0x0, wMatGap * 14 * sizeof(Vertex));
-		Vertex *__restrict vo = &minWgtMat[0];
 		const __m256 helper = _mm256_set1_ps(1);
 		uint32_t idx = 0;
-		for (const uint8_t(&item)[2] : idxmap)
+
+		for (const uint8_t(&item)[3] : idxmap)
 		{
+			auto& s2j = sh2jnt->at(idx);
+			s2j.idxs.clear(); s2j.influence.clear();
 			//calc min
 			const Vertex *__restrict va = &wgtMat[0] + item[0] * wMatGap, *__restrict vb = &wgtMat[0] + item[1] * wMatGap;
 			__m256 sumvec = _mm256_setzero_ps();
-			for (uint32_t a = wMatGap / 2; a--; vo += 2, va += 2, vb += 2)
+			const __m256 helper_zero = _mm256_setzero_ps();
+			for (uint32_t a = 0; a < wMatGap; va += 2, vb += 2, a += 2)
 			{
 				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb))/*01234567*/;
-				sumvec = _mm256_add_ps(sumvec, minM);
-				//pre-compute interlanced matrix
-				__m256 mA = _mm256_permute_ps(minM, 0b10001101);
-				mA = _mm256_permute2f128_ps(mA, mA, 0b00000001);
-				__m256 mB = _mm256_permute_ps(minM, 0b11011000);
-				_mm256_stream_ps(vo[0], _mm256_blend_ps(mA, mB, 0b11000011)/*02461357*/);
+				const bool isValid = _mm256_movemask_ps(_mm256_cmp_ps(minM, helper_zero, _CMP_NEQ_OQ));
+				if (isValid)//pre-compute matrix for updJoints
+				{
+					sumvec = _mm256_add_ps(sumvec, minM);//accumulate weights
+					__m256 mA = _mm256_permute_ps(minM, 0b10001101)/*13025746*/;
+					__m256 mB = _mm256_permute_ps(minM, 0b11011000)/*02134657*/;
+					mA = _mm256_permute2f128_ps(mA, mA, 0b00000001)/*57461302*/;
+					mB = _mm256_blend_ps(mA, mB, 0b11000011)/*02461357*/;
+
+					s2j.influence.insert(s2j.influence.end(), 2, Vertex());
+					_mm256_store_ps(s2j.influence[s2j.influence.size() - 2], mB);
+					s2j.idxs.push_back(a * 4);
+				}
 			}
 			sumvec = _mm256_hadd_ps(sumvec, sumvec);
 			sumvec = _mm256_hadd_ps(sumvec, sumvec);
 			sumvec = _mm256_add_ps(sumvec, _mm256_permute2f128_ps(sumvec, sumvec, 0b00000001));
-			minEleSum[idx++].assign(_mm256_castps256_ps128(sumvec));
+			const auto sumwgt = _mm256_castps256_ps128(sumvec);// total weights
+			for (auto& infl : s2j.influence)
+				infl.assign(_mm_div_ps(infl, sumwgt));//finally get actual weights
 		}
 	}
 	//prepare vPoints & smooth
@@ -957,6 +966,7 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 {
 	CheckCut(false);
+	SimpleTimer timer; timer.Start();
 	// Apply motion to points
 	const ModelSmooth::SmoothParam *__restrict pSP = &(modsmooth->ptSmooth[0]);
 	const uint32_t *__restrict pSC = &(modsmooth->smtCnt[0]);
@@ -1049,6 +1059,8 @@ void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
 		}
 		pSP += sc;
 	}
+	timer.Stop();
+	functime[1] += timer.ElapseNs(); funccount[1]++;
 }
 void CMesh::rigidMotionSim2_AVX(const MotionMat& M, const bool smooth)
 {
@@ -1428,6 +1440,7 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
 	CheckCut(false);
+	SimpleTimer timer;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
@@ -1470,9 +1483,12 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
 		vPoints[row].assign(newval);
 	}
+	timer.Stop();
+	functime[2] += timer.ElapseNs(); funccount[2]++;
 }
 void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
 {
+	SimpleTimer timer;
 	//row * col(3) * z(20 = 5Vertex)
 	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
 	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
@@ -1518,6 +1534,8 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 		if (validMask[row] != 0)
 			validPts.push_back(newval);
 	}
+	timer.Stop();
+	functime[3] += timer.ElapseNs(); funccount[3]++;
 }
 
 int CMesh::updateJntPos()
@@ -1529,10 +1547,6 @@ int CMesh::updateJntPos()
 	CMatrix<float> joints0; joints0.setSize(mJointNumber, mJointNumber * 3);
 	CVector<float> minEle; minEle.setSize(mNumPoints);
 	CVector<float> singleWts; singleWts.setSize(mNumPoints); singleWts = 0;
-
-	static const uint8_t idxmap[][3] = //i0,i1,i1*3
-	{ { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 },
-	{ 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
 
 	for (uint32_t a = 0; a < 14; ++a)
 	{
@@ -1655,21 +1669,21 @@ int CMesh::updateJntPos()
 
 void CMesh::updateJntPosEx()
 {
-	static const uint8_t idxmap[][2] = //i0,i1*3
-	{ { 2,0 },{ 3,6 },{ 4,9 },{ 6,0 },{ 7,18 },{ 8,21 },{ 10,0 },{ 11,30 }, { 14,30 },{ 15,42 },{ 16,45 },{ 19,30 },{ 20,57 },{ 21,60 } };
-
+	SimpleTimer timer;
+	timer.Start();
 	CMatrix<float> newJntPos(mJointNumber, 3);//3D joints
 	CMatrix<float> joints0(mJointNumber, mJointNumber * 3);
 
-	const Vertex *__restrict pMinWgt = theMinWgtMat;
 	uint32_t mIdx = 0;
-	for (const uint8_t(&item)[2] : idxmap)
+	for (const uint8_t(&item)[3] : idxmap)
 	{
-		//calc min
-		__m256 sumPosA = _mm256_setzero_ps(), sumPosB = _mm256_setzero_ps();
-		const Vertex *__restrict pOri = &vPoints[0];
-		for (uint32_t b = wMatGap / 2; b--; pOri += 8, pMinWgt += 2)
+		const auto& s2j = sh2jnt->at(mIdx++);
+		__m256 sumPos = _mm256_setzero_ps();
+		const uint32_t matsize = s2j.idxs.size();
+		const Vertex *__restrict pMinWgt = s2j.influence.data();
+		for (uint32_t b = 0; b < matsize; pMinWgt += 2)
 		{
+			const Vertex *__restrict pOri = &vPoints[s2j.idxs[b++]];
 			const __m256 wgt = _mm256_load_ps(pMinWgt[0]);
 			const __m256 tmpA = _mm256_add_ps
 			(
@@ -1681,13 +1695,11 @@ void CMesh::updateJntPosEx()
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b10101010), _mm256_load_ps(pOri[4])),
 				_mm256_mul_ps(_mm256_permute_ps(wgt, 0b11111111), _mm256_load_ps(pOri[6]))
 			);
-			sumPosA = _mm256_add_ps(sumPosA, tmpA);
-			sumPosB = _mm256_add_ps(sumPosB, tmpB);
+			sumPos = _mm256_add_ps(sumPos, _mm256_add_ps(tmpA, tmpB));
 		}
-		sumPosA = _mm256_add_ps(sumPosA, sumPosB);
-		sumPosA = _mm256_add_ps(sumPosA, _mm256_permute2f128_ps(sumPosA, sumPosA, 0b00000001));
-		const Vertex puter(_mm_div_ps(_mm256_castps256_ps128(sumPosA), minEleSum[mIdx++]));
-		joints0.putToY3(puter, item[0], item[1]);
+		sumPos = _mm256_add_ps(sumPos, _mm256_permute2f128_ps(sumPos, sumPos, 0b00000001));
+		const Vertex puter(_mm256_castps256_ps128(sumPos));
+		joints0.putToY3(puter, item[0], item[2]);
 	}
 
 	const static Vertex sum(true);
@@ -1742,6 +1754,8 @@ void CMesh::updateJntPosEx()
 		jPos(2) = newJntPos(i0, 2);
 		mJoint(i0 + 1).setPoint(jPos);
 	}
+	timer.Stop();
+	functime[0] += timer.ElapseNs(); funccount[0]++;
 }
 
 bool CMesh::minMLab(CMatrix<float> weightMatrix, int i0, int i1, CVector<float> &minEle)
