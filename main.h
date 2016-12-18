@@ -39,6 +39,7 @@
 #include <ceres/ceres.h>
 
 using atomic_uint32_t = std::atomic_uint_least32_t;
+using atomic_uint64_t = std::atomic_uint_least64_t;
 
 constexpr uint32_t POSPARAM_NUM = 31;
 constexpr uint32_t SHAPEPARAM_NUM = 20;

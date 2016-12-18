@@ -125,8 +125,8 @@ using PtrModSmooth = std::shared_ptr<ModelSmooth>;
 class CMesh
 {
 public:
-	static uint64_t functime[8];
-	static uint32_t funccount[8];
+	static atomic_uint64_t functime[8];
+	static atomic_uint32_t funccount[8];
 	constexpr static uint32_t mJointNumber = POSPARAM_NUM - 6;
 	constexpr static uint32_t MotionMatCnt = mJointNumber + 1;
 	using MotionMat = std::array<miniBLAS::SQMat4x4, MotionMatCnt>;

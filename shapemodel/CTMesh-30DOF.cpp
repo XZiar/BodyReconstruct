@@ -241,8 +241,8 @@ CMeshMotion& CMeshMotion::operator=(const CMeshMotion& aCopyFrom)
 const uint8_t CMesh::idxmap[14][3] = //i0,i1,i1*3
 { { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 }, { 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
 
-uint64_t CMesh::functime[8] = { 0 };
-uint32_t CMesh::funccount[8] = { 0 };
+atomic_uint64_t CMesh::functime[8] = { 0 };
+atomic_uint32_t CMesh::funccount[8] = { 0 };
 // operator=
 void CMesh::operator=(const CMesh& aMesh)
 {
@@ -620,10 +620,10 @@ void CMesh::prepareData()
 
 		for (const uint8_t(&item)[3] : idxmap)
 		{
-			auto& s2j = sh2jnt->at(idx);
+			auto& s2j = sh2jnt->at(idx++);
 			s2j.idxs.clear(); s2j.influence.clear();
 			//calc min
-			const Vertex *__restrict va = &wgtMat[0] + item[0] * wMatGap, *__restrict vb = &wgtMat[0] + item[1] * wMatGap;
+			const Vertex *__restrict va = &wgtMat[item[0] * wMatGap], *__restrict vb = &wgtMat[item[1] * wMatGap];
 			__m256 sumvec = _mm256_setzero_ps();
 			const __m256 helper_zero = _mm256_setzero_ps();
 			for (uint32_t a = 0; a < wMatGap; va += 2, vb += 2, a += 2)
@@ -643,9 +643,9 @@ void CMesh::prepareData()
 					s2j.idxs.push_back(a * 4);
 				}
 			}
-			sumvec = _mm256_hadd_ps(sumvec, sumvec);
-			sumvec = _mm256_hadd_ps(sumvec, sumvec);
-			sumvec = _mm256_add_ps(sumvec, _mm256_permute2f128_ps(sumvec, sumvec, 0b00000001));
+			sumvec = _mm256_hadd_ps(sumvec, sumvec)/*xy,zw,xy,zw*/;
+			sumvec = _mm256_hadd_ps(sumvec, sumvec)/*xyzw,xyzw,xyzw,xyzw*/;
+			sumvec = _mm256_add_ps(sumvec, _mm256_permute2f128_ps(sumvec, sumvec, 0x01));
 			const auto sumwgt = _mm256_castps256_ps128(sumvec);// total weights
 			for (auto& infl : s2j.influence)
 				infl.assign(_mm_div_ps(infl, sumwgt));//finally get actual weights

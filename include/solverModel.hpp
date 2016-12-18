@@ -1,152 +1,149 @@
 #pragma once
-
+/*
+ * Use CRTP to save some code, for better maintainance
+ * Solver-models for pose and shape are quite similar.
+ * At most time, the only differecnce is that pose-solving
+ * could use cache data of shape2mesh to speed up.
+ * Since they will be called millions of times while solving,
+ * CRTP could save the overhead of virtual-function
+*/
 #include "fitMesh.h"
 
 using miniBLAS::Vertex;
 using miniBLAS::VertexVec;
 
-static atomic_uint32_t runcnt(0), runtime(0);
-static uint32_t nncnt = 0, nntime = 0;
+static atomic_uint64_t runcnt(0), runtime(0), selftime(0);
 
-//Definition of optimization functions
-struct PoseCostFunctor
+template<typename CHILD>
+struct NormalCostFunctor
 {
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const arColIS isValidNN_;
-	const VertexVec& scanCache_;
+	const CShapePose *shapepose;
+	const std::vector<int8_t> isValid;
+	const VertexVec& scanCache;
+	NormalCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: shapepose(shapepose_), isValid(isValid_), scanCache(scanCache_)
+	{
+	}
+public:
+	bool operator()(const double* param, double* residual) const
+	{
+		SimpleTimer timer;
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+		{
+			if (isValid[j])
+				residual[j] = (scanCache[j] - pts[j]).length();
+			else
+				residual[j] = 0;
+		}
+		timer.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
+		return true;
+	}
+};
+struct PoseCostFunctor : public NormalCostFunctor<PoseCostFunctor>
+{
+protected:
 	const VertexVec basePts;
-
 public:
-	PoseCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), isValidNN_(isValidNN), scanCache_(scanCache), basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+	inline VertexVec getPts(const double* pose) const
 	{
+		return shapepose->getModelByPose(basePts, pose);
 	}
-	bool operator()(const double* pose, double* residual) const
+	PoseCostFunctor(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: NormalCostFunctor<PoseCostFunctor>(shapepose_, isValid_, scanCache_), basePts(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelByPose(basePts, pose);
-
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-		{
-			if (isValidNN_[j])
-				residual[j] = (scanCache_[j] - pts[j]).length();
-			else
-				residual[j] = 0;
-		}
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
 	}
 };
-struct ShapeCostFunctor
+struct ShapeCostFunctor : public NormalCostFunctor<ShapeCostFunctor>
 {
 protected:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
 	const ModelParam::PoseParam pose;
-	const arColIS isValidNN_;
-	const VertexVec& scanCache_;
 public:
-	ShapeCostFunctor(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& scanCache)
-		: shapepose_(shapepose), pose(modelParam.pose), isValidNN_(isValidNN), scanCache_(scanCache)
+	inline VertexVec getPts(const double* shape) const
+	{
+		return shapepose->getModelFast(shape, pose.data());
+	}
+	ShapeCostFunctor(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: NormalCostFunctor<ShapeCostFunctor>(shapepose_, isValid_, scanCache_), pose(modelParam.pose)
 	{
 	}
-	bool operator()(const double* shape, double* residual) const
+};
+
+template<typename CHILD>
+struct EarlyCutCostFunctor
+{
+protected:
+	// this should be the firtst to declare in order to be initialized before other things
+	const CShapePose *shapepose;
+	const PtrModSmooth mSmooth; 
+	const std::vector<int8_t> isValid;
+	const std::vector<float> weights;
+	const VertexVec& scanCache;
+	uint32_t count;
+	EarlyCutCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
+		const miniBLAS::VertexVec& scanCache_)
+		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())),
+		isValid(isValid_), weights(weights_), scanCache(scanCache_), count(scanCache_.size())
+	{
+	}
+	EarlyCutCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), weights(std::vector<float>(scanCache_.size(), 1.0f)),
+		isValid(isValid_), scanCache(scanCache_), count(scanCache_.size())
+	{
+	}
+public:
+	bool operator()(const double* param, double* residual) const
 	{
 		SimpleTimer timer;
-		const auto pts = shapepose_->getModelFast(shape, pose.data());
-
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		for (uint32_t j = 0; j < count; ++j)
 		{
-			if (isValidNN_[j])
-				residual[j] = (scanCache_[j] - pts[j]).length();
-			else
-				residual[j] = 0;
+			residual[j] = (scanCache[j] - pts[j]).length() * weights[j];
 		}
-
+		memset(&residual[count], 0, sizeof(double) * (EVALUATE_POINTS_NUM - count));
 		timer.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
 		return true;
 	}
 };
-
-struct PoseCostFunctorEx2
+struct PoseCostEC : public EarlyCutCostFunctor<PoseCostEC>
 {
 protected:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const arColIS isValidNN_;
-	const VertexVec& validScanCache_;
 	const CMesh baseMesh;
-	const PtrModSmooth mSmooth;
-	std::vector<float> weights;
 public:
-	PoseCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
-		PtrModSmooth mSmooth_, const std::vector<float>& wgts = std::vector<float>())
-		: shapepose_(shapepose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_),
-		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValidNN_.data()))
+	inline VertexVec getPts(const double* pose) const
 	{
-		weights = wgts;
+		return shapepose->getModelByPose2(mSmooth, baseMesh, pose, isValid.data());
 	}
-	bool operator()(const double* pose, double* residual) const
+	PoseCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, isValid_, scanCache_), 
+		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
 	{
-		const bool isWgt = (weights.size() > 0);
-		SimpleTimer timer;
-
-		const auto pts = shapepose_->getModelByPose2(mSmooth, baseMesh, pose, isValidNN_.data());
-
-		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
-		{
-			const Vertex delta = (validScanCache_[j] - pts[j]);
-			residual[i++] = delta.length() * (isWgt ? weights[j] : 1);
-		}
-		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
+	}
+	PoseCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_,
+		const std::vector<float>& weights_)
+		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, isValid_, weights_, scanCache_),
+		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
+	{
 	}
 };
-
-struct ShapeCostFunctorEx2
+struct ShapeCostEC : public EarlyCutCostFunctor<ShapeCostEC>
 {
 protected:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
 	const ModelParam::PoseParam pose;
-	const arColIS isValidNN_;
-	const VertexVec& validScanCache_;
-	const PtrModSmooth mSmooth;
 public:
-	ShapeCostFunctorEx2(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const miniBLAS::VertexVec& validScanCache,
-		PtrModSmooth mSmooth_)
-		: shapepose_(shapepose), pose(modelParam.pose), isValidNN_(isValidNN), validScanCache_(validScanCache), mSmooth(mSmooth_)
+	inline VertexVec getPts(const double* shape) const
 	{
+		return shapepose->getModelFast2(mSmooth, shape, pose.data(), isValid.data());
 	}
-	bool operator()(const double* shape, double* residual) const
+	ShapeCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
+		: EarlyCutCostFunctor<ShapeCostEC>(shapepose_, isValid_, scanCache_), pose(modelParam.pose)
 	{
-		SimpleTimer timer;
-
-		const auto pts = shapepose_->getModelFast2(mSmooth, shape, pose.data(), isValidNN_.data());
-
-		const uint32_t cnt = validScanCache_.size();
-		for (uint32_t i = 0, j = 0; j < cnt; ++j)
-		{
-			residual[i++] = (validScanCache_[j] - pts[j]).length();
-		}
-		memset(&residual[cnt], 0, sizeof(double) * (EVALUATE_POINTS_NUM - cnt));
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
 	}
 };
 
@@ -203,294 +200,244 @@ public:
 	}
 };
 
-struct PoseCostFunctorRe
+
+template<typename CHILD>
+struct ReverseCostFunctor
 {
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	std::vector<float> weights;
+	const CShapePose *shapepose;
 	const std::vector<uint32_t> idxMapper;
-	const uint32_t ptcount;
-	const miniBLAS::VertexVec& scanCache;
-	const VertexVec basePts;
-public:
-	PoseCostFunctorRe(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), idxMapper(idxMapper_), basePts(shapepose_->getBaseModel(modelParam.shape.data())),
-		scanCache(scanCache_), ptcount(scanCache_.size())
+	VertexVec scanCache;
+	const uint32_t count;
+	ReverseCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
+		: shapepose(shapepose_), idxMapper(idxMapper_), scanCache(scanCache_), count(scanCache_.size())
 	{
-		weights.reserve(weights_.size());
-		for (const auto w : weights_)
-			weights.push_back(w*w);
+		for (uint32_t idx = 0; idx < count; ++idx)
+			scanCache[idx].w = weights_[idx] * weights_[idx];
 	}
-	bool operator() (const double* pose, double* residual) const
+public:
+	bool operator()(const double* param, double* residual) const
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelByPose(basePts, pose);
-		VertexVec tmp(1 + EVALUATE_POINTS_NUM / 4, Vertex(0, 0, 0, 0)); float *__restrict pTmp = tmp[0];
-		//memset(pTmp, 0x0, (1 + EVALUATE_POINTS_NUM / 4) * sizeof(Vertex));
-		for (uint32_t j = 0; j < ptcount; ++j)
+		SimpleTimer timer, t2;
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		t2.Start();
+		Vertex tmp[1 + EVALUATE_POINTS_NUM / 4]; float *__restrict pTmp = tmp[0];
+		memset(pTmp, 0x0, sizeof(tmp));
+		for (uint32_t j = 0; j < count; ++j)
 		{
 			const auto idx = idxMapper[j];
-			pTmp[idx] += (scanCache[j] - pts[idx]).length_sqr() * weights[j];
+			pTmp[idx] += (scanCache[j] - pts[idx]).length_sqr() * scanCache[j].w;
 		}
-		for (auto& obj : tmp)
-			obj.do_sqrt();
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] = pTmp[j];
-		timer.Stop();
+		{
+			uint32_t i = 0, j = 0;
+			for (; j < EVALUATE_POINTS_NUM / 4; ++j, i += 4)
+				_mm256_storeu_pd(&residual[i], _mm256_cvtps_pd(_mm_sqrt_ps(tmp[j])));
+			tmp[j].do_sqrt();
+			for (; i < EVALUATE_POINTS_NUM; i++)
+				residual[i] = pTmp[i];
+		}
+		timer.Stop(); t2.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
+		selftime += t2.ElapseNs();
 		return true;
 	}
 };
-struct ShapeCostFunctorRe
+struct PoseCostRe : public ReverseCostFunctor<PoseCostRe>
 {
 protected:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
+	const VertexVec basePts;
+public:
+	inline VertexVec getPts(const double* pose) const
+	{
+		return shapepose->getModelByPose(basePts, pose);
+	}
+	PoseCostRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_) 
+		: ReverseCostFunctor<PoseCostRe>(shapepose_, idxMapper_, weights_, scanCache_), basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+	{
+	}
+};
+struct ShapeCostRe : public ReverseCostFunctor<ShapeCostRe>
+{
+protected:
 	const ModelParam::PoseParam pose;
-	std::vector<float> weights;
-	const std::vector<uint32_t> idxMapper;
-	const uint32_t ptcount;
-	const miniBLAS::VertexVec& scanCache;
 public:
-	ShapeCostFunctorRe(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_), scanCache(scanCache_), ptcount(scanCache_.size())
+	inline VertexVec getPts(const double* shape) const
 	{
-		weights.reserve(weights_.size());
-		for (const auto w : weights_)
-			weights.push_back(w*w);
+		return shapepose->getModelFast(shape, pose.data());
 	}
-	bool operator() (const double* shape, double* residual) const
+	ShapeCostRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_) 
+		: ReverseCostFunctor<ShapeCostRe>(shapepose_, idxMapper_, weights_, scanCache_), pose(modelParam.pose)
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelFast(shape, pose.data());
-		VertexVec tmp(1 + EVALUATE_POINTS_NUM / 4, Vertex(0, 0, 0, 0)); float *__restrict pTmp = tmp[0];
-		//memset(pTmp, 0x0, (1 + EVALUATE_POINTS_NUM / 4) * sizeof(Vertex));
-		for (uint32_t j = 0; j < ptcount; ++j)
-		{
-			const auto idx = idxMapper[j];
-			pTmp[idx] += (scanCache[j] - pts[idx]).length_sqr() * weights[j];
-		}
-		for (auto& obj : tmp)
-			obj.do_sqrt();
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] = pTmp[j];
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
 	}
 };
 
-static miniBLAS::VertexVec DataFilter(const miniBLAS::VertexVec& ptin, const std::vector<float>& weights)
-{
-	const uint32_t count = ptin.size();
-	miniBLAS::VertexVec ptout;
-	for (uint32_t a = 0; a < count; ++a)
-	{
-		ptout.push_back(ptin[a]);
-		ptout.back().w = weights[a];
-	}
-	return ptout;
-}
-static miniBLAS::VertexVec DataFilter(const miniBLAS::VertexVec& ptin, const std::vector<float>& weights,
-	const miniBLAS::VertexVec& fillpt, const float fillw, std::vector<uint32_t>& idxs)
-{
-	int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
-	const uint32_t count = ptin.size();
-	miniBLAS::VertexVec ptout;
-	for (uint32_t a = 0; a < count; ++a)
-	{
-		ptout.push_back(ptin[a]);
-		ptout.back().w = weights[a];
-		flags[idxs[a]] = 1;
-	}
-	for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-	{
-		if (!flags[j])
-		{
-			ptout.push_back(fillpt[j]);
-			ptout.back().w = fillw;
-			idxs.push_back(j);
-		}
-	}
-	return ptout;
-}
-struct PoseCostFunctorReShift
+
+template<typename CHILD>
+struct ReverseShiftCostFunctor
 {
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const VertexVec basePts;
-	std::vector<uint32_t> shiftParam;
-	miniBLAS::VertexVec scanCache;
+	const CShapePose *shapepose;
+	std::vector<uint32_t> idxMapper;
+	VertexVec scanCache;
 	uint32_t count;
-public:
-	PoseCostFunctorReShift(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), basePts(shapepose_->getBaseModel(modelParam.shape.data())), shiftParam(idxMapper_),
-		scanCache(DataFilter(scanCache_, weights_)), count(idxMapper_.size())
+	ReverseShiftCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
+		: shapepose(shapepose_), idxMapper(idxMapper_), scanCache(scanCache_), count(scanCache_.size())
 	{
+		for (uint32_t idx = 0; idx < count; ++idx)
+			scanCache[idx].w = weights_[idx];
 	}
-	bool operator() (const double* pose, double* residual) const
+	ReverseShiftCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_, const ModelParam& predParam, const float fillwgt)
+		: shapepose(shapepose_), idxMapper(idxMapper_)
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelByPose(basePts, pose);
-
+		int8_t flags[EVALUATE_POINTS_NUM] = { 0 };
+		count = scanCache_.size();
+		for (uint32_t a = 0; a < count; ++a)
+		{
+			scanCache.push_back(scanCache_[a]);
+			scanCache.back().w = weights_[a];
+			flags[idxMapper[a]] = 1;
+		}
+		const VertexVec fillpts = ((const CHILD&)(*this)).getPts(predParam);
+		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
+		{
+			if (!flags[j])
+			{
+				scanCache.push_back(fillpts[j]);
+				scanCache.back().w = fillwgt;
+				idxMapper.push_back(j);
+			}
+		}
+		count = scanCache.size();
+	}
+public:
+	bool operator()(const double* param, double* residual) const
+	{
+		SimpleTimer timer, t2;
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		t2.Start();
+		/*
 		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
 		memset(residual, 0x7f, sizeof(double) * EVALUATE_POINTS_NUM);
 		uint32_t i = 0;
 		for (const auto& obj : scanCache)
 		{
-			const uint32_t idx = shiftParam[i++];
-			const double val = (obj - pts[idx]).length();
-			if (val < residual[idx])
-			{
-				residual[idx] = val;
-				finwgt[idx] = obj.w;
-			}
+		const uint32_t idx = idxMapper[i++];
+		const double val = (obj - pts[idx]).length_sqr();
+		if (val < residual[idx])
+		{
+		residual[idx] = val;
+		finwgt[idx] = obj.w;
+		}
 		}
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] *= finwgt[j];
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
-	};
-};
-struct ShapeCostFunctorReShift
-{
-protected:
-	// this should be the firtst to declare in order to be initialized before other things
-	const CShapePose *shapepose_;
-	const ModelParam::PoseParam pose;
-	std::vector<uint32_t> shiftParam;
-	miniBLAS::VertexVec scanCache;
-	uint32_t count;
-public:
-	ShapeCostFunctorReShift(CShapePose *shapepose, const ModelParam& modelParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), pose(modelParam.pose), shiftParam(idxMapper_), scanCache(DataFilter(scanCache_, weights_)), count(idxMapper_.size())
-	{
-	}
-	bool operator() (const double* shape, double* residual) const
-	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelFast(shape, pose.data());
-
-		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
-		memset(residual, 0x7f, sizeof(double) * EVALUATE_POINTS_NUM);
-		uint32_t i = 0;
+		residual[j] = finwgt[j] * sqrt(residual[j]);
+		*/
+		Vertex weight[EVALUATE_POINTS_NUM / 4 + 1], tmp[EVALUATE_POINTS_NUM / 4 + 1];
+		memset(weight, 0x0, sizeof(weight)); memset(tmp, 0x7f, sizeof(tmp));
+		float *__restrict finwgt = (float*)weight, *__restrict pTmp = (float*)tmp;
+		const uint32_t *__restrict idx = idxMapper.data();
 		for (const auto& obj : scanCache)
 		{
-			const uint32_t idx = shiftParam[i++];
-			const double val = (obj - pts[idx]).length();
-			if (val < residual[idx])
+			const float val = (obj - pts[*idx]).length_sqr();
+			if (val < pTmp[*idx])
 			{
-				residual[idx] = val;
-				finwgt[idx] = obj.w;
+				pTmp[*idx] = val;
+				finwgt[*idx] = obj.w;
 			}
+			idx++;
 		}
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] *= finwgt[j];
-		
-		timer.Stop();
+		{
+			uint32_t i = 0, j = 0;
+			for (; j < EVALUATE_POINTS_NUM / 4; ++j, i += 4)
+			{
+				const __m128 ans = _mm_mul_ps(weight[j], _mm_sqrt_ps(tmp[j]));
+				_mm256_storeu_pd(&residual[i], _mm256_cvtps_pd(ans));
+			}
+			for (tmp[j].do_sqrt(); i < EVALUATE_POINTS_NUM; i++)
+				residual[i] = finwgt[i] * pTmp[i];
+		}
+		timer.Stop(); t2.Stop();
 		runcnt++;
 		runtime += timer.ElapseUs();
+		selftime += t2.ElapseNs();
 		return true;
 	}
 };
-
-struct PoseCostFunctorPredReShift
+struct PoseCostRShift : public ReverseShiftCostFunctor<PoseCostRShift>
 {
 protected:
-	const CShapePose *shapepose_;
 	const VertexVec basePts;
-	miniBLAS::VertexVec scanCache;
-	std::vector<uint32_t> idxMapper;
-	uint32_t ptcount;
 public:
-	PoseCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), basePts(shapepose_->getBaseModel(modelParam.shape.data())), idxMapper(idxMapper_)
+	inline VertexVec getPts(const double* pose) const
 	{
-		const VertexVec predVec = shapepose->getModelByPose(basePts, predParam.pose.data());
-		scanCache = DataFilter(scanCache_, weights_, predVec, 0.15f, idxMapper);
-		ptcount = scanCache.size();
+		return shapepose->getModelByPose(basePts, pose);
 	}
-	bool operator() (const double* pose, double* residual) const
+	PoseCostRShift(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_)
+		: ReverseShiftCostFunctor<PoseCostRShift>(shapepose_, idxMapper_, weights_, scanCache_),
+		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelByPose(basePts, pose);
-		float finwgt[EVALUATE_POINTS_NUM];
-		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
-		uint32_t i = 0;
-		for (const auto& obj : scanCache)
-		{
-			const uint32_t idx = idxMapper[i++];
-			const double val = (obj - pts[idx]).length();
-			if (val < residual[idx])
-			{
-				residual[idx] = val;
-				finwgt[idx] = obj.w;
-			}
-		}
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] *= finwgt[j];
-		
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
-	};
+	}
 };
-struct ShapeCostFunctorPredReShift
+struct ShapeCostRShift : public ReverseShiftCostFunctor<ShapeCostRShift>
 {
 protected:
-	const CShapePose *shapepose_;
 	const ModelParam::PoseParam pose;
-	std::vector<uint32_t> idxMapper;
-	miniBLAS::VertexVec scanCache;
-	uint32_t ptcount;
 public:
-	ShapeCostFunctorPredReShift(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& predParam, const miniBLAS::VertexVec& scanCache_,
-		const std::vector<float>& weights_, const std::vector<uint32_t>& idxMapper_)
-		: shapepose_(shapepose), pose(modelParam.pose), idxMapper(idxMapper_)
+	inline VertexVec getPts(const double* shape) const
 	{
-		const VertexVec predVec = shapepose->getModelFast(predParam.shape.data(), pose.data());
-		scanCache = DataFilter(scanCache_, weights_, predVec, 0.15f, idxMapper);
-		ptcount = scanCache.size();
+		return shapepose->getModelFast(shape, pose.data());
 	}
-	bool operator() (const double* shape, double* residual) const
+	ShapeCostRShift(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_)
+		: ReverseShiftCostFunctor<ShapeCostRShift>(shapepose_, idxMapper_, weights_, scanCache_), pose(modelParam.pose)
 	{
-		SimpleTimer timer;
-		const auto pts = shapepose_->getModelFast(shape, pose.data());
-		float finwgt[EVALUATE_POINTS_NUM];
-		memset(residual, 0x7f, sizeof(double)*EVALUATE_POINTS_NUM);
-		uint32_t i = 0;
-		for (const auto& obj : scanCache)
-		{
-			const uint32_t idx = idxMapper[i++];
-			const double val = (obj - pts[idx]).length();
-			if (val < residual[idx])
-			{
-				residual[idx] = val;
-				finwgt[idx] = obj.w;
-			}
-		}
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-			residual[j] *= finwgt[j];
-
-		timer.Stop();
-		runcnt++;
-		runtime += timer.ElapseUs();
-		return true;
-	};
+	}
+};
+struct PoseCostRPredShift : public ReverseShiftCostFunctor<PoseCostRPredShift>
+{
+protected:
+	const VertexVec basePts;
+public:
+	inline VertexVec getPts(const double* pose) const
+	{
+		return shapepose->getModelByPose(basePts, pose);
+	}
+	inline VertexVec getPts(const ModelParam& predParam) const
+	{
+		return shapepose->getModelFast(predParam.shape.data(), predParam.pose.data());
+	}
+	PoseCostRPredShift(const CShapePose *shapepose_, const ModelParam& modelParam, const ModelParam& predParam, const float fillwgt,
+		const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
+		: ReverseShiftCostFunctor<PoseCostRPredShift>(shapepose_, idxMapper_, weights_, scanCache_, predParam, fillwgt),
+		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+	{
+	}
+};
+struct ShapeCostRPredShift : public ReverseShiftCostFunctor<ShapeCostRPredShift>
+{
+protected:
+	const ModelParam::PoseParam pose;
+public:
+	inline VertexVec getPts(const double* shape) const
+	{
+		return shapepose->getModelFast(shape, pose.data());
+	}
+	inline VertexVec getPts(const ModelParam& predParam) const
+	{
+		return shapepose->getModelFast(predParam.shape.data(), predParam.pose.data());
+	}
+	ShapeCostRPredShift(const CShapePose *shapepose_, const ModelParam& modelParam, const ModelParam& predParam, const float fillwgt,
+		const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
+		: ReverseShiftCostFunctor<ShapeCostRPredShift>(shapepose_, idxMapper_, weights_, scanCache_, predParam, fillwgt), pose(modelParam.pose)
+	{
+	}
 };
 
 
