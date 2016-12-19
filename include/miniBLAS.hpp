@@ -203,6 +203,13 @@ public:
 		for (uint8_t a = 0; a < N; ++a)
 			ptr[a] = data[a];
 	};
+	template<uint8_t N, typename T2>
+	void load(const T2 *ptr)
+	{
+		static_assert(N <= 4, "there is only 4 elements");
+		for (uint8_t a = 0; a < N; ++a)
+			data[a] = ptr[a];
+	};
 };
 
 

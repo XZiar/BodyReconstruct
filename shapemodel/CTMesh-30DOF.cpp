@@ -276,7 +276,8 @@ void CMesh::operator=(const CMesh& aMesh)
 	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
 
 	evecCache = aMesh.evecCache;
-	wgtMat = aMesh.wgtMat;
+	evecCache2 = aMesh.evecCache2;
+	//wgtMat = aMesh.wgtMat;
 	wMatGap = aMesh.wMatGap;
 	sh2jnt = aMesh.sh2jnt;
 	vPoints = aMesh.vPoints;
@@ -302,6 +303,7 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
+	evecCache2 = from.evecCache2;
 	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
@@ -330,6 +332,7 @@ CMesh::CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmoot
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
+	evecCache2 = from.evecCache2;
 	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 
@@ -574,6 +577,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	return true;
 }
 
+//evectors are dense, which means no shortcut could be taken for speedup
 void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 {
 	evectors = evectorsIn;
@@ -583,31 +587,64 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 		getchar();
 		exit(-1);
 	}
-	const uint32_t rows = evectorsIn.n_cols / 3, gap = evectorsIn.n_elem / 3;
-	evecCache->resize(rows * 64);//15+1 vertex for a row
+	if (evectorsIn.n_cols != EVALUATE_POINTS_NUM*3)
+	{
+		printf("evecctors should be %d points for optimization.\n\n", EVALUATE_POINTS_NUM);
+		getchar();
+		exit(-1);
+	}
+	const uint32_t gap = evectorsIn.n_elem / 3;
+	evecCache->resize(EVALUATE_POINTS_NUM * 16);//15+1 vertex for a row
 	float *pVert = (*evecCache)[0];
 	//20 * x(rows*3)
 	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
-	for (uint32_t a = 0; a < rows; ++a)
+	for (uint32_t a = 0; a < EVALUATE_POINTS_NUM; ++a)
 	{
-		for (uint32_t b = 0; b < 20; ++b)
+		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
 			*pVert++ = *px++;
-		for (uint32_t b = 0; b < 20; ++b)
+		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
 			*pVert++ = *py++;
-		for (uint32_t b = 0; b < 20; ++b)
+		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
 			*pVert++ = *pz++;
 		pVert += 4;
+	}
+	{
+		uint32_t i = 0;
+		evecCache2->resize(EVALUATE_POINTS_NUM * SHAPEPARAM_NUM * 3 / 4);
+		for (uint32_t pn = 0; pn < SHAPEPARAM_NUM; pn += 4)
+		{
+			const double *tpx = evectorsIn.memptr() + pn, *tpy = tpx + gap, *tpz = tpy + gap;
+			for (uint32_t ptn = EVALUATE_POINTS_NUM / 4; ptn--;)
+			{
+				//4 points a group---2AVX
+				evecCache2->at(i++).load<4>(tpx);
+				evecCache2->at(i++).load<4>(tpx + 20);
+				evecCache2->at(i++).load<4>(tpx + 40);
+				evecCache2->at(i++).load<4>(tpx + 60);
+				tpx += SHAPEPARAM_NUM * 4;
+				evecCache2->at(i++).load<4>(tpy);
+				evecCache2->at(i++).load<4>(tpy + 20);
+				evecCache2->at(i++).load<4>(tpy + 40);
+				evecCache2->at(i++).load<4>(tpy + 60);
+				tpy += SHAPEPARAM_NUM * 4;
+				evecCache2->at(i++).load<4>(tpz);
+				evecCache2->at(i++).load<4>(tpz + 20);
+				evecCache2->at(i++).load<4>(tpz + 40);
+				evecCache2->at(i++).load<4>(tpz + 60);
+				tpz += SHAPEPARAM_NUM * 4;
+			}
+		}
 	}
 }
 
 void CMesh::prepareData()
 {
+	wMatGap = (mNumPoints + 3) / 4;
+	if (wMatGap & 0x1)
+		wMatGap++;// at least for AVX--32byte boundary
+	miniBLAS::VertexVec wgtMat(wMatGap*mJointNumber);
 	//prepare weightMatrix
 	{
-		wMatGap = (mNumPoints + 3) / 4;
-		if (wMatGap & 0x1)
-			wMatGap++;// at least for AVX--32byte boundary
-		wgtMat.resize(wMatGap*mJointNumber);
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
 		const uint32_t ept = 4 - (mNumPoints & 0x3);
@@ -1436,52 +1473,59 @@ void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 		));
 	}
 }
-
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
+/*
+void CMesh::NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
 	CheckCut(false);
 	SimpleTimer timer;
-	//row * col(3) * z(20 = 5Vertex)
-	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
-	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
-	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = &(*evecCache)[0];
-	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
+	//20 * row(EVALUATE_POINTS_NUM) * col(3)
+	const float *__restrict pEc = (float*)evecCache2->data();
+	for (uint32_t pn = 0; pn < SHAPEPARAM_NUM; pn++)
 	{
-		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-		const __m256 addA = _mm256_add_ps
-		(
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
-				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
-				0b00100010),
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
-				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
-				0b01000100)
-		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
-		const __m256 addB = _mm256_add_ps
-		(
-			_mm256_add_ps(
-				_mm256_blend_ps(
-					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
-					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
-				_mm256_insertf128_ps(
-					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
-					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
-			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
-				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
-				0b00100010)
-		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
-		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
-		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
-		vPoints[row].assign(newval);
+		const __m256 param = _mm256_set1_ps(((float*)shapeParamsIn)[pn]);
+		float *__restrict pPt = vPoints[0];
+		for (uint32_t i = vPoints.size() / 8; i--; pPt += 32, pEc += 32)
+		{
+#ifdef __FMA__
+			_mm256_store_ps(pPt + 0, _mm256_fmadd_ps(_mm256_load_ps(pEc + 0), param, _mm256_load_ps(pPt + 0)));
+			_mm256_store_ps(pPt + 8, _mm256_fmadd_ps(_mm256_load_ps(pEc + 8), param, _mm256_load_ps(pPt + 8)));
+			_mm256_store_ps(pPt + 16, _mm256_fmadd_ps(_mm256_load_ps(pEc + 16), param, _mm256_load_ps(pPt + 16)));
+			_mm256_store_ps(pPt + 24, _mm256_fmadd_ps(_mm256_load_ps(pEc + 24), param, _mm256_load_ps(pPt + 24)));
+#else
+			const __m256 i12 = _mm256_mul_ps(_mm256_load_ps(pEc), param), i34 = _mm256_mul_ps(_mm256_load_ps(pEc + 8), param),
+				i56 = _mm256_mul_ps(_mm256_load_ps(pEc + 16), param), i78 = _mm256_mul_ps(_mm256_load_ps(pEc + 24), param);
+			_mm256_store_ps(pPt + 0, _mm256_add_ps(_mm256_load_ps(pPt + 0), i12));
+			_mm256_store_ps(pPt + 8, _mm256_add_ps(_mm256_load_ps(pPt + 8), i34));
+			_mm256_store_ps(pPt + 16, _mm256_add_ps(_mm256_load_ps(pPt + 16), i56));
+			_mm256_store_ps(pPt + 24, _mm256_add_ps(_mm256_load_ps(pPt + 24), i78));
+#endif
+		}
+	}
+	timer.Stop();
+	functime[2] += timer.ElapseNs(); funccount[2]++;
+}
+*/
+void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
+{
+	SimpleTimer timer;
+	//5 * row(EVALUATE_POINTS_NUM/2) * 3(xyz) * 4(4param)
+	const float *__restrict pEc = (float*)evecCache2->data();
+	for (uint32_t pn = 0; pn < SHAPEPARAM_NUM / 4; pn++)
+	{
+		const __m256 param = _mm256_set_m128(shapeParamsIn[pn], shapeParamsIn[pn]);
+		float *__restrict pPt = vPoints[0];
+		//!!!!The last point is left unchanged!!!!
+		for (uint32_t i = EVALUATE_POINTS_NUM / 4; i--; pPt += 16, pEc += 48)
+		{
+			const __m256 pt12 = _mm256_load_ps(pPt), pt34 = _mm256_load_ps(pPt + 8);
+			const __m256 inf12x = _mm256_dp_ps(_mm256_load_ps(pEc), param, 0xf1), inf34x = _mm256_dp_ps(_mm256_load_ps(pEc + 8), param, 0xf1),
+				inf12y = _mm256_dp_ps(_mm256_load_ps(pEc + 16), param, 0xf2), inf34y = _mm256_dp_ps(_mm256_load_ps(pEc + 24), param, 0xf2),
+				inf12z = _mm256_dp_ps(_mm256_load_ps(pEc + 32), param, 0xf4), inf34z = _mm256_dp_ps(_mm256_load_ps(pEc + 40), param, 0xf4);
+			const __m256 infl12 = _mm256_blend_ps(inf12z, _mm256_blend_ps(inf12x, inf12y, 0x22), 0x33),
+				infl34 = _mm256_blend_ps(inf34z, _mm256_blend_ps(inf34x, inf34y, 0x22), 0x33);
+			_mm256_store_ps(pPt, _mm256_add_ps(pt12, infl12));
+			_mm256_store_ps(pPt + 8, _mm256_add_ps(pt34, infl34));
+		}
 	}
 	timer.Stop();
 	functime[2] += timer.ElapseNs(); funccount[2]++;
@@ -1489,54 +1533,114 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
 {
 	SimpleTimer timer;
-	//row * col(3) * z(20 = 5Vertex)
-	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
-	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
-	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = &(*evecCache)[0];
-	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
-	{
-		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-		const __m256 addA = _mm256_add_ps
-		(
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
-				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
-				0b00100010),
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
-				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
-				0b01000100)
-		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
-		const __m256 addB = _mm256_add_ps
-		(
-			_mm256_add_ps(
-				_mm256_blend_ps(
-					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
-					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
-				_mm256_insertf128_ps(
-					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
-					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
-			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
-			_mm256_blend_ps(
-				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
-				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
-				0b00100010)
-		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
-		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
-		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
-		vPoints[row].assign(newval);
-
-		if (validMask[row] != 0)
-			validPts.push_back(newval);
-	}
+	fastShapeChangesToMesh_AVX(shapeParamsIn);
+	validPts.clear(); validPts.reserve(EVALUATE_POINTS_NUM / 2);
+	for (uint32_t i = 0; i < EVALUATE_POINTS_NUM; ++i)
+		if (validMask[i])
+			validPts.push_back(vPoints[i]);
 	timer.Stop();
 	functime[3] += timer.ElapseNs(); funccount[3]++;
 }
+//void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
+//{
+//	CheckCut(false);
+//	SimpleTimer timer;
+//	//row * col(3) * z(20 = 5Vertex)
+//	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
+//	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
+//	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
+//	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
+//	const Vertex *__restrict pEvec = &(*evecCache)[0];
+//	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
+//	{
+//		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
+//		const __m256 addA = _mm256_add_ps
+//		(
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
+//				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
+//				0b00100010),
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
+//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
+//				0b01000100)
+//		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
+//		const __m256 addB = _mm256_add_ps
+//		(
+//			_mm256_add_ps(
+//				_mm256_blend_ps(
+//					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
+//					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
+//				_mm256_insertf128_ps(
+//					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
+//					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
+//			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
+//				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
+//				0b00100010)
+//		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
+//		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
+//		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
+//		vPoints[row].assign(newval);
+//	}
+//	timer.Stop();
+//	functime[2] += timer.ElapseNs(); funccount[2]++;
+//}
+//void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
+//{
+//	SimpleTimer timer;
+//	//row * col(3) * z(20 = 5Vertex)
+//	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
+//	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
+//	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
+//	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
+//	const Vertex *__restrict pEvec = &(*evecCache)[0];
+//	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
+//	{
+//		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
+//		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
+//		const __m256 addA = _mm256_add_ps
+//		(
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
+//				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
+//				0b00100010),
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
+//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
+//				0b01000100)
+//		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
+//		const __m256 addB = _mm256_add_ps
+//		(
+//			_mm256_add_ps(
+//				_mm256_blend_ps(
+//					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
+//					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
+//				_mm256_insertf128_ps(
+//					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
+//					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
+//			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
+//			_mm256_blend_ps(
+//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
+//				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
+//				0b00100010)
+//		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
+//		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
+//		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
+//		vPoints[row].assign(newval);
+//
+//		if (validMask[row] != 0)
+//			validPts.push_back(newval);
+//	}
+//	timer.Stop();
+//	functime[3] += timer.ElapseNs(); funccount[3]++;
+//}
 
 int CMesh::updateJntPos()
 {

@@ -1567,8 +1567,16 @@ void fitMesh::mainProcess()
 	}
 	{
 		printf("\n\n");
-		printf("Re----- : per %lld ns\n", ftm_time[0] / ftm_count[0]);
-		printf("ReShift : per %lld ns\n", ftm_time[1] / ftm_count[0]);
+		if (curFrame > 0)
+		{
+			printf("Re----- : per %lld ns\n", ftm_time[0] / ftm_count[0]);
+			printf("ReShift : per %lld ns\n", ftm_time[1] / ftm_count[0]);
+			printf("\n\n");
+		}
+		printf("updJnt : per %lld ns\n", CMesh::functime[0] / CMesh::funccount[0]);
+		printf("rigMot : per %lld ns\n", CMesh::functime[1] / CMesh::funccount[1]);
+		printf("m2sNew : per %lld ns\n", CMesh::functime[2] / CMesh::funccount[2]);
+		printf("m2sCut : per %lld ns\n", CMesh::functime[3] / CMesh::funccount[3]);
 		printf("\n\n");
 	}
 	if (curFrame == 0 && yesORno("load previous 9999 params?"))

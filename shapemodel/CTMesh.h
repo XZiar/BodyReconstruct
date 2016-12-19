@@ -136,6 +136,7 @@ public:
 	CMesh()
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
+		evecCache2.reset(new miniBLAS::VertexVec());
 		modsmooth.reset(new ModelSmooth());
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
@@ -152,6 +153,8 @@ public:
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
+	//void NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
+	//void NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	int updateJntPos();
@@ -278,9 +281,9 @@ protected:
 	static const uint8_t idxmap[14][3];
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
+	std::shared_ptr<miniBLAS::VertexVec> evecCache2;
 
-
-	miniBLAS::VertexVec wgtMat;
+	//miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
 	struct ShapeJointParam
 	{
