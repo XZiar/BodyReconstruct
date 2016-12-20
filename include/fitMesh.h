@@ -121,6 +121,7 @@ public:
 	bool isRayTrace = false;
 	bool isAngWgt = true;
 	bool isReShift = false;
+	bool isP2S = false;
 	bool isShFix = true;
 
 	uint32_t nSamplePoints;
@@ -141,6 +142,7 @@ private:
 	double scale;
 	arColIS isValidNN_;
 	std::vector<float> weights;
+	miniBLAS::VertexVec normalCache;
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 

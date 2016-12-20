@@ -28,7 +28,7 @@ using miniBLAS::VertexIVec;
 using PointT = pcl::PointXYZRGBNormal;
 using PointCloudT = pcl::PointCloud<PointT>;
 
-static uint64_t ftm_time[8] = { 0 }, ftm_count[8] = { 0 };
+static uint64_t ftm_time[8] = { 0 }, ftm_count[8] = { 1,1,1,1,1,1,1,1 };
 
 bool FastTriangle::intersect(const Vertex& origin, const Vertex& direction, const VertexI& idx, const float dist) const
 {
@@ -392,7 +392,22 @@ bool fitMesh::loadScan(CScan& scan)
 		scan.points = scan.points_orig;
 		scan.normals = scan.normals_orig;
 	}
-	else//sample the scan points if necessary;
+	else
+	{
+		const float step = scan.nPoints*1.0f / nSamplePoints;
+		scan.points = arma::zeros(nSamplePoints, 3);
+		scan.normals = arma::zeros(nSamplePoints, 3);
+		uint32_t i = 0;
+		for (float cur = 0; i < nSamplePoints; cur += step, ++i)
+		{
+			const uint32_t idx = cur;
+			//printf("sample %7d to %7d\n", idx, i);
+			scan.points.row(i) = scan.points_orig.row(idx);
+			scan.normals.row(i) = scan.normals_orig.row(idx);
+		}
+		scan.nPoints = i;
+	}
+	if(false)//sample the scan points if necessary;
 	{
 		scan.sample_point_idxes = tools.randperm(scan.nPoints, nSamplePoints);
 		scan.nPoints = nSamplePoints;
@@ -648,10 +663,11 @@ void fitMesh::fitShapePose(const CScan& scan, const std::vector<FitParam>& fitpa
 		const auto& param = fitparams[a];
 		sumVNN = updatePoints(scan, curMParam, param.anglim, idxMapper, isValidNN_, err);
 		showResult(scan);
+		getchar();
 
 		const auto scanCache = shuffleANDfilter(scan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
-		//if (isFastCost)
-			//msmooth = shapepose.preCompute(isValidNN_.data());
+		normalCache = shuffleANDfilter(scan.vNorms, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
+
 		if (param.isSPose)
 		{
 			cout << "fit pose\n"; 
@@ -748,11 +764,16 @@ void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::V
     cout<<"construct problem: pose\n";
 	Problem problem;
 
-	if (curFrame > 3 && curiter > 0)
+	if (isP2S)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostP2SEC, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostP2SEC(&shapepose, curMParam, isValidNN, weights, scanCache, normalCache));
+		problem.AddResidualBlock(cost_function, NULL, pose);
+	}
+	else if (curFrame > 3 && curiter > 0)
 	{
 		auto *cost_functionPred = new ceres::NumericDiffCostFunction<PoseCostFunctorPred, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(isAngWgt ? new PoseCostFunctorPred(&shapepose, curMParam, predMParam, isValidNN, scanCache, weights) :
-				new PoseCostFunctorPred(&shapepose, curMParam, predMParam, isValidNN, scanCache));
+			(new PoseCostFunctorPred(&shapepose, curMParam, predMParam, isValidNN, scanCache, weights));
 		problem.AddResidualBlock(cost_functionPred, NULL, pose);
 	}
 	else if (isFastCost)
@@ -760,12 +781,6 @@ void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::V
 		auto *cost_functionEC = new ceres::NumericDiffCostFunction<PoseCostEC, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
 			(isAngWgt ? new PoseCostEC(&shapepose, curMParam, isValidNN, scanCache, weights) : new PoseCostEC(&shapepose, curMParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEC, NULL, pose);
-		/*
-		auto *cost_functionEx2 = new ceres::NumericDiffCostFunction<PoseCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(isAngWgt ? new PoseCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth, weights) :
-				new PoseCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth));
-		problem.AddResidualBlock(cost_functionEx2, NULL, pose);
-		*/
 	}
 	else
 	{
@@ -799,14 +814,17 @@ void fitMesh::solveShape(const ceres::Solver::Options& options, const miniBLAS::
     Problem problem;
 	cout << "construct problem: SHAPE\n";
 
-	if (isFastCost)
+	if (isP2S)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostP2SEC, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new ShapeCostP2SEC(&shapepose, curMParam, isValidNN, scanCache, normalCache));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+	}
+	else if (isFastCost)
 	{
 		auto cost_functionEC = new ceres::NumericDiffCostFunction<ShapeCostEC, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
 			(new ShapeCostEC(&shapepose, curMParam, isValidNN, scanCache));
 		problem.AddResidualBlock(cost_functionEC, NULL, shape);
-		/*auto cost_functionEx2 = new ceres::NumericDiffCostFunction<ShapeCostFunctorEx2, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorEx2(&shapepose, curMParam, isValidNN, scanCache, msmooth));
-		problem.AddResidualBlock(cost_functionEx2, NULL, shape);*/
 	}
 	else
 	{
@@ -815,7 +833,7 @@ void fitMesh::solveShape(const ceres::Solver::Options& options, const miniBLAS::
 		problem.AddResidualBlock(cost_function, NULL, shape);
 	}
 
-	if (curFrame > 0)
+	if (curFrame > 0 && false)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
 			(new ShapeSofter(bakMParam, lastErr / 2));
@@ -840,13 +858,16 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const VertexVe
 
 	cout << "construct problem: pose\n";
 	Problem problem;
-
-	if (curFrame > 3 && curiter > 0)
+	if (isP2S)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostP2SRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new PoseCostP2SRe(&shapepose, curMParam, idxs, weights, scanCache, normalCache));
+		problem.AddResidualBlock(cost_function, NULL, pose);
+	}
+	else if (curFrame > 3 && curiter > 0)
 	{
 		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostRPredShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
 			(new PoseCostRPredShift(&shapepose, curMParam, predMParam, 0.1f, idxs, weights, scanCache));
-		/*auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorPredReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(new PoseCostFunctorPredReShift(&shapepose, curMParam, predMParam, scanCache, weights, idxs));*/
 		problem.AddResidualBlock(cost_function, NULL, pose);
 	}
 	/*else if (isReShift)
@@ -860,9 +881,6 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const VertexVe
 		auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
 			(new PoseCostRe(&shapepose, curMParam, idxs, weights, scanCache));
 		problem.AddResidualBlock(cost_function, NULL, pose);
-		/*auto *cost_function = new ceres::NumericDiffCostFunction<PoseCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
-			(new PoseCostFunctorRe(&shapepose, curMParam, scanCache, weights, idxs));
-		problem.AddResidualBlock(cost_function, NULL, pose);*/
 	}
 	if (curFrame > 0)
 	{
@@ -890,12 +908,17 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const VertexV
 	Problem problem;
 	cout << "construct problem: SHAPE\n";
 	uint8_t tcid = 0;
-	if (isReShift)
+	if (isP2S)
+	{
+		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostP2SRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+			(new ShapeCostP2SRe(&shapepose, curMParam, idxs, weights, scanCache, normalCache));
+		problem.AddResidualBlock(cost_function, NULL, shape);
+		tcid = 2;
+	}
+	else if (isReShift)
 	{
 		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostRShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
 			(new ShapeCostRShift(&shapepose, curMParam, idxs, weights, scanCache));
-		/*auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorReShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorReShift(&shapepose, curMParam, scanCache, weights, idxs));*/
 		problem.AddResidualBlock(cost_function, NULL, shape);
 		tcid = 1;
 	}
@@ -904,11 +927,8 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const VertexV
 		auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
 			(new ShapeCostRe(&shapepose, curMParam, idxs, weights, scanCache));
 		problem.AddResidualBlock(cost_function, NULL, shape);
-		/*auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctorRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctorRe(&shapepose, curMParam, scanCache, weights, idxs));
-		problem.AddResidualBlock(cost_function, NULL, shape);*/
 	}
-	if (curFrame > 0)
+	if (curFrame > 0 && false)
 	{
 		auto *soft_function = new ceres::NumericDiffCostFunction<ShapeSofter, ceres::CENTRAL, SHAPEPARAM_NUM, SHAPEPARAM_NUM>
 			(new ShapeSofter(bakMParam, lastErr / 2));
@@ -999,6 +1019,7 @@ void fitMesh::solveAllPose(const ceres::Solver::Options& options, const double a
 		showResult(curScan);
 
 		const auto scanCache = shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
+		normalCache = shuffleANDfilter(curScan.vNorms, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
 		msmooth = shapepose.preCompute(isValidNN_.data());
 
 		solvePose(options, scanCache, isValidNN_, err, 1);
@@ -1027,11 +1048,21 @@ void fitMesh::solveAllShape(const ceres::Solver::Options& options, const double 
 		sumVNN = updatePoints(curScan, curMParam, angLim, idxMapper, validNN, err);
 		logger.log(true, "NN matched : %d \n", sumVNN);
 		showResult(curScan);
-		scanPts.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
-
-		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostFunctor(&shapepose, modelParams[b], validNN, scanPts.back()));
-		problem.AddResidualBlock(cost_function, NULL, shape);
+		if (isP2S)
+		{
+			const auto scanCache = shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], validNN.data());
+			normalCache = shuffleANDfilter(curScan.vNorms, tempbody.nPoints, &idxMapper[0], nullptr);
+			auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostP2SEC, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+				(new ShapeCostP2SEC(&shapepose, modelParams[b], validNN, scanCache, normalCache));
+			problem.AddResidualBlock(cost_function, NULL, shape);
+		}
+		else
+		{
+			scanPts.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
+			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+				(new ShapeCostFunctor(&shapepose, modelParams[b], validNN, scanPts.back()));
+			problem.AddResidualBlock(cost_function, NULL, shape);
+		}
 	}
 
 	Solver::Summary summary;
@@ -1063,9 +1094,18 @@ void fitMesh::solveAllShapeRe(const ceres::Solver::Options& options, const doubl
 
 		showResult(curScan);
 
-		auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostRShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
-			(new ShapeCostRShift(&shapepose, curMParam, idxMapper, weights, scanCache));
-		problem.AddResidualBlock(cost_function, NULL, shape);
+		if (isP2S)
+		{
+			auto *cost_function = new ceres::NumericDiffCostFunction<ShapeCostP2SRe, ceres::CENTRAL, EVALUATE_POINTS_NUM, POSPARAM_NUM>
+				(new ShapeCostP2SRe(&shapepose, curMParam, idxMapper, weights, scanCache, normalCache));
+			problem.AddResidualBlock(cost_function, NULL, shape);
+		}
+		else
+		{
+			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostRShift, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
+				(new ShapeCostRShift(&shapepose, curMParam, idxMapper, weights, scanCache));
+			problem.AddResidualBlock(cost_function, NULL, shape);
+		}
 	}
 
 	Solver::Summary summary;
@@ -1334,7 +1374,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 
 	{
 		//weights = vector<float>(scan.nPoints, 0);
-		weights.clear(); idxs.clear(); ptCache.clear();
+		weights.clear(); idxs.clear(); ptCache.clear(); normalCache.clear();
 		float distAll = 0;
 		const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
 		for (uint32_t i = 0; i < scan.nPoints; i++)
@@ -1350,7 +1390,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 			{
 				weights.push_back(thecos > limcos ? 1 : thecos * cosInv);
 				idxs.push_back(idx);
-				ptCache.push_back(scan.vPts[i]);
+				ptCache.push_back(scan.vPts[i]); normalCache.push_back(scan.vNorms[i]);
 				sumVNN++;
 				distAll += nnres.dists[i];
 			}
@@ -1478,6 +1518,7 @@ void fitMesh::init(const std::string& baseName, const bool isOnce)
 	baseFName = baseName;
 	//isShFix = yesORno("fix shoulder?");
 	//isFastCost = yesORno("use fast cost func?");
+	isP2S = yesORno("use Point<->surface calculation?");
 	angleLimit = inputNumber("angle limit", 30);
 	//isRayTrace = yesORno("use ray trace to cut?");
 	//isAngWgt = yesORno("use weight on angles?");
@@ -1567,12 +1608,9 @@ void fitMesh::mainProcess()
 	}
 	{
 		printf("\n\n");
-		if (curFrame > 0)
-		{
-			printf("Re----- : per %lld ns\n", ftm_time[0] / ftm_count[0]);
-			printf("ReShift : per %lld ns\n", ftm_time[1] / ftm_count[0]);
-			printf("\n\n");
-		}
+		printf("Re----- : per %lld ns\n", ftm_time[0] / ftm_count[0]);
+		printf("ReShift : per %lld ns\n", ftm_time[1] / ftm_count[0]);
+		printf("\n\n");
 		printf("updJnt : per %lld ns\n", CMesh::functime[0] / CMesh::funccount[0]);
 		printf("rigMot : per %lld ns\n", CMesh::functime[1] / CMesh::funccount[1]);
 		printf("m2sNew : per %lld ns\n", CMesh::functime[2] / CMesh::funccount[2]);

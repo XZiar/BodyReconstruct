@@ -147,6 +147,82 @@ public:
 	}
 };
 
+
+template<typename CHILD>
+struct EarlyCutP2SCostFunctor
+{
+protected:
+	// this should be the firtst to declare in order to be initialized before other things
+	const CShapePose *shapepose;
+	const PtrModSmooth mSmooth;
+	const std::vector<int8_t> isValid;
+	VertexVec scanCache;
+	const VertexVec normCache;
+	uint32_t count;
+	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
+		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
+		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
+	{
+		for (uint32_t idx = 0; idx < count; ++idx)
+			scanCache[idx].w = weights_[idx];
+	}
+	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
+		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
+	{
+		for (uint32_t idx = 0; idx < count; ++idx)
+			scanCache[idx].w = 1.0f;
+	}
+public:
+	bool operator()(const double* param, double* residual) const
+	{
+		SimpleTimer timer;
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		const __m128 absmask = _mm_castsi128_ps(_mm_set1_epi32(INT32_MAX));
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			const __m128 len2 = _mm_and_ps(_mm_dp_ps(pts[j] - scanCache[j], normCache[j], 0x7f), absmask);
+			const __m128 vcurlen = _mm_mul_ps(_mm_sqrt_ps(len2)/*l,l,l,l*/, _mm_permute_ps(scanCache[j], 0xff)/*w,w,w,w*/);
+			residual[j] = _mm_cvtsd_f64(_mm_cvtps_pd(vcurlen));
+		}
+		memset(&residual[count], 0, sizeof(double) * (EVALUATE_POINTS_NUM - count));
+		timer.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
+		return true;
+	}
+};
+struct PoseCostP2SEC : public EarlyCutP2SCostFunctor<PoseCostP2SEC>
+{
+protected:
+	const CMesh baseMesh;
+public:
+	inline VertexVec getPts(const double* pose) const
+	{
+		return shapepose->getModelByPose2(mSmooth, baseMesh, pose, isValid.data());
+	}
+	PoseCostP2SEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
+		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
+		: EarlyCutP2SCostFunctor<PoseCostP2SEC>(shapepose_, isValid_, weights_, scanCache_, normCache_),
+		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
+	{
+	}
+};
+struct ShapeCostP2SEC : public EarlyCutP2SCostFunctor<ShapeCostP2SEC>
+{
+protected:
+	const ModelParam::PoseParam pose;
+public:
+	inline VertexVec getPts(const double* shape) const
+	{
+		return shapepose->getModelFast2(mSmooth, shape, pose.data(), isValid.data());
+	}
+	ShapeCostP2SEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_,
+		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
+		: EarlyCutP2SCostFunctor<ShapeCostP2SEC>(shapepose_, isValid_, scanCache_, normCache_), pose(modelParam.pose)
+	{
+	}
+};
+
 struct PoseCostFunctorPred
 {
 protected:
@@ -439,6 +515,89 @@ public:
 	{
 	}
 };
+
+
+template<typename CHILD>
+struct ReverseP2SCostFunctor
+{
+protected:
+	// this should be the firtst to declare in order to be initialized before other things
+	const CShapePose *shapepose;
+	std::vector<uint32_t> idxMapper;
+	VertexVec scanCache;
+	const VertexVec normCache;
+	uint32_t count;
+	ReverseP2SCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_, const VertexVec& normCache_)
+		: shapepose(shapepose_), idxMapper(idxMapper_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
+	{
+		for (uint32_t idx = 0; idx < count; ++idx)
+			scanCache[idx].w = weights_[idx] * weights_[idx];
+	}
+public:
+	bool operator()(const double* param, double* residual) const
+	{
+		SimpleTimer timer, t2;
+		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
+		t2.Start();
+		Vertex tmp[1 + EVALUATE_POINTS_NUM / 4]; float *__restrict pTmp = tmp[0];
+		memset(pTmp, 0x0, sizeof(tmp));
+		const __m128 absmask = _mm_castsi128_ps(_mm_set1_epi32(INT32_MAX));
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			const auto idx = idxMapper[j];
+			const __m128 vcurlen = _mm_mul_ps(
+				_mm_dp_ps(pts[idx] - scanCache[j], normCache[j], 0x7f)/*l2,l2,l2,l2*/,
+				_mm_permute_ps(scanCache[j], 0xff)/*w,w,w,w*/);
+			pTmp[idx] += _mm_cvtss_f32(_mm_and_ps(vcurlen, absmask));
+		}
+		{
+			uint32_t i = 0, j = 0;
+			for (; j < EVALUATE_POINTS_NUM / 4; ++j, i += 4)
+				_mm256_storeu_pd(&residual[i], _mm256_cvtps_pd(_mm_sqrt_ps(tmp[j])));
+			tmp[j].do_sqrt();
+			for (; i < EVALUATE_POINTS_NUM; i++)
+				residual[i] = pTmp[i];
+		}
+		timer.Stop(); t2.Stop();
+		runcnt++;
+		runtime += timer.ElapseUs();
+		selftime += t2.ElapseNs();
+		return true;
+	}
+};
+struct PoseCostP2SRe : public ReverseP2SCostFunctor<PoseCostP2SRe>
+{
+protected:
+	const VertexVec basePts;
+public:
+	inline VertexVec getPts(const double* pose) const
+	{
+		return shapepose->getModelByPose(basePts, pose);
+	}
+	PoseCostP2SRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_, const VertexVec& normCache_)
+		: ReverseP2SCostFunctor<PoseCostP2SRe>(shapepose_, idxMapper_, weights_, scanCache_, normCache_),
+		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+	{
+	}
+};
+struct ShapeCostP2SRe : public ReverseP2SCostFunctor<ShapeCostP2SRe>
+{
+protected:
+	const ModelParam::PoseParam pose;
+public:
+	inline VertexVec getPts(const double* shape) const
+	{
+		return shapepose->getModelFast(shape, pose.data());
+	}
+	ShapeCostP2SRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_, const VertexVec& normCache_)
+		: ReverseP2SCostFunctor<ShapeCostP2SRe>(shapepose_, idxMapper_, weights_, scanCache_, normCache_), pose(modelParam.pose)
+	{
+	}
+};
+
 
 
 struct MovementSofter
