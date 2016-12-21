@@ -358,7 +358,7 @@ bool fitMesh::loadScan(CScan& scan)
 		fclose(fp);
 	}
 
-	cout << "loading " << fname << endl;
+	printf("loading %s ...\n", fname.c_str());
 	const int read_status = pcl::io::loadPLYFile(fname, cloud_tmp);
 	printf("read status: %d, load %lld points AND normals.\n", read_status, cloud_tmp.points.size());
 
@@ -431,11 +431,11 @@ void fitMesh::loadTemplate()
 	arma::mat pts;
 	//template.mat should be pre-calculated : meanshape.mat-mean(meanshape)
 	pts.load(dataDir + "template.mat");
-	cout << "Template points loaded: " << pts.n_rows << "," << pts.n_cols << endl;
+	printf("Template points loaded: %d,%d\n", pts.n_rows, pts.n_cols);
 	
 	arma::mat faces;
 	faces.load(dataDir + "faces.mat");
-	cout << "Template faces loaded: " << faces.n_rows << "," << faces.n_cols << endl;
+	printf("Template faces loaded: %d,%d\n", faces.n_rows, faces.n_cols);
 	//face index starts from 1
 	faces -= 1;
 
@@ -458,10 +458,10 @@ void fitMesh::loadModel()
 	arma::mat evectors, evalues;
 
 	evectors.load(dataDir + "reduced_evectors.mat");
-	cout << "eigen vectors loaded: " << evectors.n_rows << "," << evectors.n_cols << endl;
+	printf("eigen vectors loaded: %d,%d\n", evectors.n_rows, evectors.n_cols);
 	evalues.load(dataDir + "evalues.mat");
 	evalues = evalues.cols(0, SHAPEPARAM_NUM - 1);
-	cout << "eigen values loaded: " << evalues.n_rows << "," << evalues.n_cols << endl;
+	printf("eigen values loaded: %d,%d\n", evalues.n_rows, evalues.n_cols);
 
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
@@ -544,7 +544,7 @@ arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, dou
 void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
 {
     //align the scan points to the template based on PCA, note the coordinates direction
-    cout<<"align with pca\n";
+    printf("align with pca\n");
     arma::rowvec meanpoints;
     arma::mat Rsc;
     arma::mat eig_vec;
@@ -574,6 +574,35 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     }
     arma::mat R = (eig_vec * Rsc.i()).t();
 
+	if (mode && yesORno("fix rotate?",false))
+	{
+		auto spc = [&](CScan sc, const arma::mat& rmat)
+		{
+			sc.points = scpoint*rmat;
+			sc.prepare();
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+			sc.ShowPC(*cloud, pcl::PointXYZRGB(192, 0, 0));
+			viewer.showCloud(cloud);
+		};
+		spc(scanbody, R);
+		if (yesORno("x-axis rotate?", false))
+		{
+			R.col(0) *= -1;
+			spc(scanbody, R);
+		}
+		if (yesORno("y-axis rotate?", false))
+		{
+			R.col(1) *= -1;
+			spc(scanbody, R);
+		}
+		if (yesORno("z-axis rotate?", false))
+		{
+			R.col(2) *= -1;
+			spc(scanbody, R);
+		}
+		getchar();
+	}
+
     double dDepth = 0;
 	if(isShFix)
 		R = rigidAlignFix(scpoint, R, dDepth);
@@ -586,8 +615,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
 	const arma::rowvec max_t = arma::max(tempbody.points, 0);
 	const arma::rowvec min_t = arma::min(tempbody.points, 0);
 
-   const double s = (max_s(2)-min_s(2)) / (max_t(2)-min_t(2));
-    cout<<"the scale is: "<<s<<endl;
+	const double s = (max_s(2)-min_s(2)) / (max_t(2)-min_t(2));
+    //cout<<"the scale is: "<<s<<endl;
     //translate the scan points
 
     meanpoints = mean(tempbody.points,0);
@@ -663,14 +692,13 @@ void fitMesh::fitShapePose(const CScan& scan, const std::vector<FitParam>& fitpa
 		const auto& param = fitparams[a];
 		sumVNN = updatePoints(scan, curMParam, param.anglim, idxMapper, isValidNN_, err);
 		showResult(scan);
-		getchar();
 
 		const auto scanCache = shuffleANDfilter(scan.vPts, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
 		normalCache = shuffleANDfilter(scan.vNorms, tempbody.nPoints, &idxMapper[0], isFastCost ? isValidNN_.data() : nullptr);
 
 		if (param.isSPose)
 		{
-			cout << "fit pose\n"; 
+			printf("fit pose\n"); 
 			solvedP = true;
 			solvePose(param.option, scanCache, isValidNN_, err, a);
 			//copy first correction of base 6 param
@@ -682,7 +710,7 @@ void fitMesh::fitShapePose(const CScan& scan, const std::vector<FitParam>& fitpa
 		}
 		if (param.isSShape)
 		{
-			cout << "fit shape\n";
+			printf("fit shape\n");
 			solvedS = true;
 			solveShape(param.option, scanCache, isValidNN_, err);
 			if (curFrame > 0)
@@ -696,7 +724,7 @@ void fitMesh::fitShapePose(const CScan& scan, const std::vector<FitParam>& fitpa
 	sumVNN = updatePoints(scan, curMParam, angleLimit, idxMapper, isValidNN_, err);
 	showResult(scan);
 	//wait until the window is closed
-	cout << "optimization finished\n";
+	printf("optimization finished\n");
 	if (solvedP)
 		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	if (solvedS)
@@ -724,7 +752,7 @@ void fitMesh::fitShapePoseRe(const CScan & scan, const std::vector<FitParam>& fi
 
 		if (param.isSPose)
 		{
-			cout << "fit poseRe\n";
+			printf("fit poseRe\n");
 			solvedP = true;
 			solvePoseRe(param.option, scanCache, idxMapper, err, a);
 			//copy first correction of base 6 param
@@ -736,7 +764,7 @@ void fitMesh::fitShapePoseRe(const CScan & scan, const std::vector<FitParam>& fi
 		}
 		if (param.isSShape)
 		{
-			cout << "fit shapeRe\n";
+			printf("fit shapeRe\n");
 			solvedS = true;
 			solveShapeRe(param.option, scanCache, idxMapper, err);
 			if (curFrame > 0)
@@ -750,7 +778,7 @@ void fitMesh::fitShapePoseRe(const CScan & scan, const std::vector<FitParam>& fi
 	sumVNN = updatePointsRe(scan, curMParam, angleLimit, idxMapper, scanCache, err);
 	showResult(scan);
 	//wait until the window is closed
-	cout << "optimization finished\n";
+	printf("optimization finished\n");
 	if (solvedP)
 		logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	if (solvedS)
@@ -761,7 +789,7 @@ void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::V
 {
 	double *pose = curMParam.pose.data();
 
-    cout<<"construct problem: pose\n";
+	printf("construct problem: pose\n");
 	Problem problem;
 
 	if (isP2S)
@@ -797,12 +825,12 @@ void fitMesh::solvePose(const ceres::Solver::Options& options, const miniBLAS::V
 	}
     Solver::Summary summary;
     
-	cout << "solving...\n";
+	printf("solving...\n");
 	runcnt.store(0);
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
 	
-    cout << summary.BriefReport();
+	cout << summary.BriefReport();
 	tSPose += runtime; cSPose += runcnt;
 	const double rt = runtime; const uint32_t rc = runcnt;
 	logger.log(summary.FullReport()).log(true, "\nposeCost  invoked %d times, avg %f ms\n\n", rc, rt / (rc * 1000));
@@ -812,7 +840,7 @@ void fitMesh::solveShape(const ceres::Solver::Options& options, const miniBLAS::
 	double *shape = curMParam.shape.data();
 
     Problem problem;
-	cout << "construct problem: SHAPE\n";
+	printf("construct problem: SHAPE\n");
 
 	if (isP2S)
 	{
@@ -841,7 +869,7 @@ void fitMesh::solveShape(const ceres::Solver::Options& options, const miniBLAS::
 	}
     Solver::Summary summary;
 
-	cout << "solving...\n";
+	printf("solving...\n");
 	runcnt.store(0);
 	runtime.store(0);
     ceres::Solve(options, &problem, &summary);
@@ -856,7 +884,7 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const VertexVe
 {
 	double *pose = curMParam.pose.data();
 
-	cout << "construct problem: pose\n";
+	printf("construct problem: pose\n");
 	Problem problem;
 	if (isP2S)
 	{
@@ -890,7 +918,7 @@ void fitMesh::solvePoseRe(const ceres::Solver::Options & options, const VertexVe
 	}
 	Solver::Summary summary;
 
-	cout << "solving...\n";
+	printf("solving...\n");
 	runcnt.store(0);
 	runtime.store(0); selftime.store(0);
 	ceres::Solve(options, &problem, &summary);
@@ -906,7 +934,7 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const VertexV
 	double *shape = curMParam.shape.data();
 
 	Problem problem;
-	cout << "construct problem: SHAPE\n";
+	printf("construct problem: SHAPE\n");
 	uint8_t tcid = 0;
 	if (isP2S)
 	{
@@ -936,7 +964,7 @@ void fitMesh::solveShapeRe(const ceres::Solver::Options & options, const VertexV
 	}
 	Solver::Summary summary;
 
-	cout << "solving...\n";
+	printf("solving...\n");
 	runcnt.store(0);
 	runtime.store(0); selftime.store(0);
 	ceres::Solve(options, &problem, &summary);
@@ -995,7 +1023,7 @@ void fitMesh::fitFinal(const std::vector<FitParam>& fitparams)
 	sumVNN = updatePoints(scanFrames.back(), curMParam, angleLimit, idxMapper, isValidNN_, err);
 	showResult(scanFrames.back());
 	//wait until the window is closed
-	cout << "optimization finished\n";
+	printf("optimization finished\n");
 	logger.log(true, "POSE : %d times, %f ms each.\n", cSPose, tSPose / (cSPose * 1000));
 	logger.log(true, "SHAPE: %d times, %f ms each.\n", cSShape, tSShape / (cSShape * 1000));
 	logger.log(true, "KNN : %d times, %f ms each.\nFinally valid nn : %d, total error : %f\n\n", cMatchNN, tMatchNN / cMatchNN, sumVNN, err).flush();
@@ -1034,7 +1062,7 @@ void fitMesh::solveAllShape(const ceres::Solver::Options& options, const double 
 	vector<uint32_t> idxMapper(tempbody.nPoints);
 	double *shape = curMParam.shape.data();
 	Problem problem;
-	cout << "construct problem: SHAPE\n";
+	printf("construct problem: SHAPE\n");
 
 	vector<VertexVec> scanPts;
 	scanPts.reserve(modelParams.size());
@@ -1066,7 +1094,7 @@ void fitMesh::solveAllShape(const ceres::Solver::Options& options, const double 
 	}
 
 	Solver::Summary summary;
-	cout << "solving...\n";
+	printf("solving...\n");
 	runcnt.store(0); runtime.store(0);
 	ceres::Solve(options, &problem, &summary);
 

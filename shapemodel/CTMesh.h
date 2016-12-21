@@ -114,11 +114,12 @@ struct ModelSmooth
 {
 	struct SmoothParam
 	{
-		uint32_t idx;
+		uint16_t pid;
+		uint16_t jid;
 		float weight;
 	};
-	std::vector<uint32_t> smtCnt;
 	std::vector<SmoothParam> ptSmooth;
+	uint32_t smtCnt[4] = { 0 };
 };
 using PtrModSmooth = std::shared_ptr<ModelSmooth>;
 
@@ -141,6 +142,7 @@ public:
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
 	CMesh(const CMesh& aMesh) { *this = aMesh; };
+	CMesh(const bool isFastCopy, const CMesh& from);
 	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
 	CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmooth);
 	~CMesh() = default;
@@ -153,8 +155,6 @@ public:
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
 	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
-	//void NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
-	//void NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	int updateJntPos();
@@ -174,15 +174,16 @@ public:
 	//void draw();
 
 	// Performs rigid body motions M of the mesh points in the kinematic chain
+	// Apply motion to points
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
-	void rigidMotionSim_AVX(const MotionMat& M, const bool smooth = false);
-	void rigidMotionSim2_AVX(const MotionMat& M, const bool smooth = false);
+	void rigidMotionSim_AVX(const MotionMat& M);
+	void rigidMotionSim2_AVX(const MotionMat& M);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
 	void makeSmooth(CMesh* initMesh, bool dual = false);
 
 	void angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
-	MotionMat angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles);
+	MotionMat angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles) const;
 	void invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
 	void twistToMatrix(CVector<float>& aTwist, CVector<CMatrix<float> >& M);
 

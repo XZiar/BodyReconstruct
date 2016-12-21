@@ -196,7 +196,7 @@ CJoint& CJoint::operator=(CJoint& aCopyFrom)
 	mPoint = aCopyFrom.mPoint; vPoint = aCopyFrom.vPoint;
 	mMoment = aCopyFrom.mMoment; vMom = aCopyFrom.vMom;
 	mParent = aCopyFrom.mParent;
-	vDM = vDM;
+	vDM = aCopyFrom.vDM;
 	return *this;
 }
 
@@ -281,8 +281,6 @@ void CMesh::operator=(const CMesh& aMesh)
 	wMatGap = aMesh.wMatGap;
 	sh2jnt = aMesh.sh2jnt;
 	vPoints = aMesh.vPoints;
-	//ptSmooth = aMesh.ptSmooth;
-	//thePtSmooth = &ptSmooth[0];
 }
 
 CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
@@ -339,6 +337,35 @@ CMesh::CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmoot
 	modsmooth = msmooth;
 	vPoints = baseMesh.vPoints;
 	validPts = baseMesh.validPts;
+}
+CMesh::CMesh(const bool isFastCopy, const CMesh& from)
+{
+	if (!isFastCopy)
+	{
+		*this = from;
+		return;
+	}
+	isCopy = true;
+	mNumPoints = from.mNumPoints;
+
+	mBounds = from.mBounds;
+	mCenter = from.mCenter;
+	mJoint = from.mJoint;
+	mJointMap = from.mJointMap;
+	mNeighbor = from.mNeighbor;
+	mEndJoint = from.mEndJoint;
+	mCovered = from.mCovered;
+	mExtremity = from.mExtremity;
+	mInfluencedBy = from.mInfluencedBy;
+
+	//avoid overhead of copying data unecessarily
+	evecCache = from.evecCache;
+	evecCache2 = from.evecCache2;
+	wMatGap = from.wMatGap;
+	sh2jnt = from.sh2jnt;
+	modsmooth = from.modsmooth;
+	vPoints = from.vPoints;
+	validPts = from.validPts;
 }
 
 // readModel
@@ -639,22 +666,18 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 
 void CMesh::prepareData()
 {
-	wMatGap = (mNumPoints + 3) / 4;
-	if (wMatGap & 0x1)
-		wMatGap++;// at least for AVX--32byte boundary
-	miniBLAS::VertexVec wgtMat(wMatGap*mJointNumber);
-	//prepare weightMatrix
-	{
+	{//prepare weightMatrix
+		wMatGap = (mNumPoints + 3) / 4;
+		if (wMatGap & 0x1)
+			wMatGap++;// at least for AVX--32byte boundary
+		miniBLAS::VertexVec wgtMat(wMatGap*mJointNumber);
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
-		const uint32_t ept = 4 - (mNumPoints & 0x3);
 		for (uint32_t a = 0; a < mJointNumber; ++a)
 			memcpy(&wgtMat[a*wMatGap], &pWM[a*mNumPoints], mNumPoints * sizeof(float));
-	}
-	{
+
 		const __m256 helper = _mm256_set1_ps(1);
 		uint32_t idx = 0;
-
 		for (const uint8_t(&item)[3] : idxmap)
 		{
 			auto& s2j = sh2jnt->at(idx++);
@@ -688,54 +711,135 @@ void CMesh::prepareData()
 				infl.assign(_mm_div_ps(infl, sumwgt));//finally get actual weights
 		}
 	}
-	//prepare vPoints & smooth
-	vPoints.resize(mNumPoints + 7);//at lest multiply of 8
-	memset(&vPoints[mNumPoints], 0x0, 7 * sizeof(Vertex));
-	modsmooth->ptSmooth.clear();
-	modsmooth->smtCnt.resize(mNumPoints);
-	for (uint32_t a = 0; a < mNumPoints; ++a)
+	uint32_t allsmtcnt = 0;
 	{
-		uint8_t scnt = 0;
-		const float *ptr = mPoints[a].data();
-		vPoints[a].assign(ptr);
-		vPoints[a].w = 1;
-		for (uint32_t c = 0; c < mNumSmooth; c++)
+		vector<ModelSmooth::SmoothParam> spgroup[4];
+		//prepare vPoints & smooth
+		vPoints.resize(mNumPoints + 7);//at lest multiply of 8
+		memset(&vPoints[mNumPoints], 0x0, 7 * sizeof(Vertex));
+		modsmooth->ptSmooth.clear();
+		for (uint16_t a = 0; a < mNumPoints; ++a)
 		{
-			const float weight = ptr[4 + 2 * c];
-			if (weight > 10e-6)//take it
+			const float *ptr = mPoints[a].data();
+			vPoints[a].assign(ptr);
+			vPoints[a].w = 1;
+			vector<ModelSmooth::SmoothParam> tmpsp;
+			for (uint32_t c = 0; c < mNumSmooth; c++)
 			{
-				scnt++;
-				modsmooth->ptSmooth.push_back({ 4 * uint32_t(ptr[3 + 2 * c]), weight });//pre compute idx
+				const float weight = ptr[4 + 2 * c];
+				if (weight > 10e-6)//take it
+					tmpsp.push_back({ a, uint16_t(4 * uint16_t(ptr[3 + 2 * c])), weight });//pre compute idx
+			}
+			if(!tmpsp.empty())
+			{
+				allsmtcnt += tmpsp.size();
+				if (tmpsp.size() > 4)// remove lowest weight smooth param
+				{
+					std::sort(tmpsp.begin(), tmpsp.end(), [](const auto& l, const auto& r) { return l.weight > r.weight; });
+					float allweight;
+					for (uint32_t curidx = 0; curidx < 4; curidx++)
+						allweight += tmpsp[curidx].weight;
+					allweight = 1 / allweight;
+					for (uint32_t curidx = 0; curidx < 4; curidx++)
+						tmpsp[curidx].weight *= allweight;
+					tmpsp.resize(4);
+				}
+				auto& objspv = spgroup[tmpsp.size() - 1];
+				objspv.insert(objspv.end(), tmpsp.begin(), tmpsp.end());
 			}
 		}
-		if (scnt == 0)
+		uint32_t scidx = 0;
+		for (auto& spg : spgroup)
 		{
-			modsmooth->smtCnt[a] = 1;
-			modsmooth->ptSmooth.push_back({ 4, 0 });// this 0 weight will be ignore and considered weight 1 though
+			modsmooth->smtCnt[scidx++] = spg.size();
+			modsmooth->ptSmooth.insert(modsmooth->ptSmooth.end(), spg.begin(), spg.end());
 		}
-		else
-			modsmooth->smtCnt[a] = scnt;
 	}
-	//theSmtCnt = &smtCnt[0];
-	//thePtSmooth = &ptSmooth[0];
+	if(false)
+	{
+		FILE *fp = fopen("smtcheck.txt", "w+");
+		uint32_t catcnta[2] = { 0 };
+		for (uint32_t a = 1; a <= mJointNumber; ++a)
+		{
+			uint32_t catcntb[2] = { 0 };
+			fprintf(fp, "Joint %2d\n", a);
+			for (uint32_t b = 0; b < mNumPoints;)
+			{
+				bool flags[2] = { false };
+				const float *ptr1 = mPoints[b++].data();
+				for (uint32_t c = 0; c < mNumSmooth; c++)
+				{
+					const float weight = ptr1[4 + 2 * c];
+					const uint32_t jid = ptr1[3 + 2 * c];
+					if (weight > 10e-6 && jid == a)//take it
+						flags[0] = true;
+				}
+				if (b < mNumPoints)
+				{
+					const float *ptr2 = mPoints[b++].data();
+					for (uint32_t c = 0; c < mNumSmooth; c++)
+					{
+						const float weight = ptr2[4 + 2 * c];
+						const uint32_t jid = ptr2[3 + 2 * c];
+						if (weight > 10e-6 && jid == a)//take it
+							flags[1] = true;
+					}
+				}
+				fprintf(fp, "%c,%c\t", flags[0] ? 'Y' : 'N', flags[1] ? 'Y' : 'N');
+				if (flags[0] && flags[1])
+				{
+					fprintf(fp, "Y\n");
+					catcntb[1]++;
+				}
+				else if (flags[0] || flags[1])
+				{
+					fprintf(fp, "Y\n");
+					catcntb[0]++;
+				}
+				else
+					fprintf(fp, "N\n");
+			}
+			fprintf(fp, "%4d half / %4d both / %4d total\n\n", catcntb[0], catcntb[1], (mNumPoints + 1) / 2);
+			catcnta[0] += catcntb[0];
+			catcnta[1] += catcntb[1];
+		}
+		fprintf(fp, "total\n%5d half / %5d both / %5d need / %5d total\n\n", catcnta[0], catcnta[1], catcnta[0] + catcnta[1], (mNumPoints + 1) / 2 * mJointNumber);
+		fprintf(fp, "all %5d smooth.\n", allsmtcnt);
+		fclose(fp);
+	}
 }
 
 PtrModSmooth CMesh::preCompute(const int8_t *__restrict validMask) const
 {
 	PtrModSmooth validSmooth = std::make_shared<ModelSmooth>();
 	validSmooth->ptSmooth.clear();
-	validSmooth->smtCnt.clear();
-	for (uint32_t row = 0, smtIdx = 0; row < mNumPoints; ++row)
+
+	vector<uint32_t> mapper(mNumPoints, 0);
+	for (uint32_t a = 0, b = 0; a < mNumPoints; ++a)
 	{
-		const uint32_t sc = modsmooth->smtCnt[row];
-		if (validMask[row] != 0)
-		{
-			validSmooth->smtCnt.push_back(sc);
-			validSmooth->ptSmooth.insert(validSmooth->ptSmooth.end(), &modsmooth->ptSmooth[smtIdx], &modsmooth->ptSmooth[smtIdx + sc]);
-		}
-		smtIdx += sc;
+		if (validMask[a])
+			mapper[a] = b++;
 	}
-	//validPts.resize(validSmooth->smtCnt.size());
+
+	uint32_t idx = 0;
+	for (uint32_t splimit = 1; splimit <= 4; ++splimit)
+	{
+		for (uint32_t a = modsmooth->smtCnt[splimit - 1]; a > 0; a -= splimit, idx += splimit)
+		{
+			const uint32_t curid = modsmooth->ptSmooth[idx].pid;
+			if (validMask[curid])
+			{
+				const uint32_t newid = mapper[curid];
+				for (uint32_t b = 0; b < splimit; ++b)
+				{
+					auto sp = modsmooth->ptSmooth[idx + b];
+					sp.pid = newid;
+					validSmooth->ptSmooth.push_back(sp);
+				}
+				validSmooth->smtCnt[splimit - 1] += splimit;
+			}
+		}
+	}
 	return validSmooth;
 }
 
@@ -1000,199 +1104,214 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 		mCurrentMotion.mPoseParameters += X;
 	}
 }
-void CMesh::rigidMotionSim_AVX(const MotionMat& M, const bool smooth)
+void CMesh::rigidMotionSim_AVX(const MotionMat& M)
 {
 	CheckCut(false);
-	SimpleTimer timer; timer.Start();
-	// Apply motion to points
-	const ModelSmooth::SmoothParam *__restrict pSP = &(modsmooth->ptSmooth[0]);
-	const uint32_t *__restrict pSC = &(modsmooth->smtCnt[0]);
+	SimpleTimer timer;
 	Vertex *__restrict pPt = &vPoints[0];
-	const __m128 *pMat = &M[0][0];
-	for (int i = mNumPoints; i--; pPt++)
+	const __m128 *pMat = &M[0][0]; const __m256 *pMat2 = (const __m256 *)pMat;
+	uint32_t idx = 0;
+	//calculate 1 influence
+	for (uint32_t a = modsmooth->smtCnt[0]; a--; idx++)
 	{
-		const uint32_t sc = *pSC++;
-		const __m128 dat = *pPt; const __m256 adat = _mm256_set_m128(dat, dat);
-		switch (sc)
-		{
-		case 1:
-		{
-			const __m128 *trans = &pMat[pSP[0].idx];
-			pPt->assign(_mm_blend_ps
+		const auto& sp = modsmooth->ptSmooth[idx];
+		const __m128 *trans = &pMat[sp.jid];
+		const __m128 dat = pPt[sp.pid];
+		pPt[sp.pid].assign(_mm_blend_ps
+		(
+			_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+			_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+		)/*x,y,z,0*/);
+	}
+	//calculate 2 influence
+	for (uint32_t a = modsmooth->smtCnt[1]; a > 0; idx += 2, a -= 2)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = pPt[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]);
+		const __m256 pmzz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pmxx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pmyy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31);
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+			_mm256_blend_ps
 			(
-				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-			)/*x,y,z,0*/);
-			break;
-		}
-		case 2:
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx]; const __m128 *trans1 = &pMat[pSP[1].idx];
-			const __m256 tmp = _mm256_mul_ps
+				_mm256_blend_ps(_mm256_dp_ps(dat, pmxx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pmyy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pmzz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+	}
+	//calculate 3 influence
+	for (uint32_t a = modsmooth->smtCnt[2]; a > 0; idx += 3, a -= 3)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = pPt[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]);
+		const __m256 pmzz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pmxx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pmyy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31);
+		const __m128 dat2 = pt;
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp01 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for 01*/,
+			_mm256_blend_ps
 			(
-				_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
-				_mm256_blend_ps
-				(
-					_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-				)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		case 3:
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx];
-			const __m128 *trans1 = &pMat[pSP[1].idx]; const __m128 *trans2 = &pMat[pSP[2].idx];
-			const __m256 wgt12 = _mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight));
-			const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+				_mm256_blend_ps(_mm256_dp_ps(dat, pmxx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pmyy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pmzz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		const __m128 *trans = &pMat[pSP[2].jid];
+		const __m256 tmp2 = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+		(
+			_mm_set1_ps(pSP[2].weight)/*weight for 2*/,
+			_mm_blend_ps
 			(
-				_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
-				_mm_blend_ps
-				(
-					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
-				)/*x,y,z,0*/
-			));
-			const __m256 tmpB = _mm256_mul_ps
-			(wgt12, _mm256_blend_ps
-				(
-					_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-				)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		default://just consider first 4
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx]; const __m128 *trans1 = &pMat[pSP[1].idx];
-			const __m256 wgt01 = _mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight));
-			const __m128 *trans2 = &pMat[pSP[2].idx]; const __m128 *trans3 = &pMat[pSP[3].idx];
-			const __m256 wgt23 = _mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight));
-			const __m256 tmpA = _mm256_mul_ps
-			(wgt01, _mm256_blend_ps
-				(
-					_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-				)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			const __m256 tmpB = _mm256_mul_ps
-			(wgt23, _mm256_blend_ps
-				(
-					_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110010)/*0,y2,0,0;0,y3,0,0*/, 0b10101010)/*x2,y2,0,0;x3,y3,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
-				)/*x2,y2,z2,0;x3,y3,z3,0*/
-			);
-			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			pPt->assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		}
-		pSP += sc;
+				_mm_movelh_ps(_mm_dp_ps(dat2, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat2, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+				_mm_dp_ps(dat2, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+			)/*x,y,z,0*/
+		));
+		const __m256 tmp = _mm256_add_ps(tmp01, tmp2);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+	}
+	//calculate 4 influence
+	for (uint32_t a = modsmooth->smtCnt[3]; a > 0; idx += 4, a -= 4)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = pPt[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]),
+			pm2xy = _mm256_load_ps((const float*)&pMat[pSP[2].jid]), pm3xy = _mm256_load_ps((const float*)&pMat[pSP[3].jid]);
+		const __m256 pm01zz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pm23zz = _mm256_set_m128(pMat[pSP[3].jid + 2], pMat[pSP[2].jid + 2]),
+			pm01xx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pm01yy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31),
+			pm23xx = _mm256_permute2f128_ps(pm2xy, pm3xy, 0x20), pm23yy = _mm256_permute2f128_ps(pm2xy, pm3xy, 0x31);
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp01 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for 01*/,
+			_mm256_blend_ps
+			(
+				_mm256_blend_ps(_mm256_dp_ps(dat, pm01xx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pm01yy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pm01zz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		const __m256 tmp23 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight))/*weight for 23*/,
+			_mm256_blend_ps
+			(
+				_mm256_blend_ps(_mm256_dp_ps(dat, pm23xx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pm23yy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pm23zz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		const __m256 tmp = _mm256_add_ps(tmp01, tmp23);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
 	}
 	timer.Stop();
 	functime[1] += timer.ElapseNs(); funccount[1]++;
 }
-void CMesh::rigidMotionSim2_AVX(const MotionMat& M, const bool smooth)
+void CMesh::rigidMotionSim2_AVX(const MotionMat& M)
 {
 	CheckCut(true);
-	// Apply motion to points
-	const ModelSmooth::SmoothParam *__restrict pSP = &(modsmooth->ptSmooth[0]);
-	const uint32_t *__restrict pSC = &(modsmooth->smtCnt[0]);
-	const uint32_t cnt = validPts.size();
-	const __m128 *pMat = &M[0][0];
-	for (uint32_t i = 0; i < cnt; i++)
+	const __m128 *pMat = &M[0][0]; const __m256 *pMat2 = (const __m256 *)pMat;
+	uint32_t idx = 0;
+	//calculate 1 influence
+	for (uint32_t a = modsmooth->smtCnt[0]; a--; idx++)
 	{
-		const uint32_t sc = pSC[i];
-		const __m128 dat = validPts[i]; const __m256 adat = _mm256_set_m128(dat, dat);
-		switch (sc)
-		{
-		case 1:
-		{
-			const __m128 *trans = &pMat[pSP[0].idx];
-			validPts[i].assign(_mm_blend_ps
+		const auto& sp = modsmooth->ptSmooth[idx];
+		const __m128 *trans = &pMat[sp.jid];
+		const __m128 dat = validPts[sp.pid];
+		validPts[sp.pid].assign(_mm_blend_ps
+		(
+			_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+			_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+		)/*x,y,z,0*/);
+	}
+	//calculate 2 influence
+	for (uint32_t a = modsmooth->smtCnt[1]; a > 0; idx += 2, a -= 2)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = validPts[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]);
+		const __m256 pmzz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pmxx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pmyy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31);
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
+			_mm256_blend_ps
 			(
-				_mm_movelh_ps(_mm_dp_ps(dat, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-				_mm_dp_ps(dat, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
-			)/*x,y,z,0*/);
-			break;
-		}
-		case 2:
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx]; const __m128 *trans1 = &pMat[pSP[1].idx];
-			const __m256 tmp = _mm256_mul_ps
-			(
-				_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for two*/,
-				_mm256_blend_ps
-				(
-					_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-						_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
-				)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		case 3:
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx];
-			const __m128 *trans1 = &pMat[pSP[1].idx]; const __m128 *trans2 = &pMat[pSP[2].idx];
-			const __m256 wgt12 = _mm256_set_m128(_mm_set1_ps(pSP[2].weight), _mm_set1_ps(pSP[1].weight));
-			const __m256 tmpA = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
-			(
-				_mm_set1_ps(pSP[0].weight)/*weight for 0*/,
-				_mm_blend_ps
-				(
-					_mm_movelh_ps(_mm_dp_ps(dat, trans0[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat, trans0[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
-					_mm_dp_ps(dat, trans0[1], 0b11110010)/*0,y,0,0*/, 0b1010
-				)/*x,y,z,0*/
-			));
-			const __m256 tmpB = _mm256_mul_ps
-			(wgt12, _mm256_blend_ps
-			(
-				_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans2[0], trans1[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans2[1], trans1[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-				_mm256_dp_ps(adat, _mm256_set_m128(trans2[2], trans1[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				_mm256_blend_ps(_mm256_dp_ps(dat, pmxx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pmyy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pmzz, 0xf4)/*00z0,00z0*/, 0b11001100
 			)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		default://just consider first 4
-		{
-			const __m128 *trans0 = &pMat[pSP[0].idx]; const __m128 *trans1 = &pMat[pSP[1].idx];
-			const __m256 wgt01 = _mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight));
-			const __m128 *trans2 = &pMat[pSP[2].idx]; const __m128 *trans3 = &pMat[pSP[3].idx];
-			const __m256 wgt23 = _mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight));
-			const __m256 tmpA = _mm256_mul_ps
-			(wgt01, _mm256_blend_ps
+		);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+	}
+	//calculate 3 influence
+	for (uint32_t a = modsmooth->smtCnt[2]; a > 0; idx += 3, a -= 3)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = validPts[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]);
+		const __m256 pmzz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pmxx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pmyy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31);
+		const __m128 dat2 = pt;
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp01 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for 01*/,
+			_mm256_blend_ps
 			(
-				_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans1[0], trans0[0]), 0b11110001)/*x0,0,0,0;x1,0,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans1[1], trans0[1]), 0b11110010)/*0,y0,0,0;0,y1,0,0*/, 0b10101010)/*x0,y0,0,0;x1,y1,0,0*/,
-				_mm256_dp_ps(adat, _mm256_set_m128(trans1[2], trans0[2]), 0b11110100)/*0,0,z0,0;0,0,z1,0*/, 0b11001100
+				_mm256_blend_ps(_mm256_dp_ps(dat, pmxx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pmyy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pmzz, 0xf4)/*00z0,00z0*/, 0b11001100
 			)/*x0,y0,z0,0;x1,y1,z1,0*/
-			);
-			const __m256 tmpB = _mm256_mul_ps
-			(wgt23, _mm256_blend_ps
+		);
+		const __m128 *trans = &pMat[pSP[2].jid];
+		const __m256 tmp2 = _mm256_set_m128(_mm_setzero_ps(), _mm_mul_ps
+		(
+			_mm_set1_ps(pSP[2].weight)/*weight for 2*/,
+			_mm_blend_ps
 			(
-				_mm256_blend_ps(_mm256_dp_ps(adat, _mm256_set_m128(trans3[0], trans2[0]), 0b11110001)/*x2,0,0,0;x3,0,0,0*/,
-					_mm256_dp_ps(adat, _mm256_set_m128(trans3[1], trans2[1]), 0b11110010)/*0,y2,0,0;0,y3,0,0*/, 0b10101010)/*x2,y2,0,0;x3,y3,0,0*/,
-				_mm256_dp_ps(adat, _mm256_set_m128(trans3[2], trans2[2]), 0b11110100)/*0,0,z2,0;0,0,z3,0*/, 0b11001100
-			)/*x2,y2,z2,0;x3,y3,z3,0*/
-			);
-			const __m256 tmp = _mm256_add_ps(tmpA, tmpB);
-			validPts[i].assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
-			break;
-		}
-		}
-		pSP += sc;
+				_mm_movelh_ps(_mm_dp_ps(dat2, trans[0], 0b11110001)/*x,0,0,0*/, _mm_dp_ps(dat2, trans[2], 0b11110001)/*z,0,0,0*/)/*x,0,z,0*/,
+				_mm_dp_ps(dat2, trans[1], 0b11110010)/*0,y,0,0*/, 0b1010
+			)/*x,y,z,0*/
+		));
+		const __m256 tmp = _mm256_add_ps(tmp01, tmp2);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
+	}
+	//calculate 4 influence
+	for (uint32_t a = modsmooth->smtCnt[3]; a > 0; idx += 4, a -= 4)
+	{
+		const auto* pSP = &modsmooth->ptSmooth[idx];
+		auto& pt = validPts[pSP[0].pid];
+		const __m256 pm0xy = _mm256_load_ps((const float*)&pMat[pSP[0].jid]), pm1xy = _mm256_load_ps((const float*)&pMat[pSP[1].jid]),
+			pm2xy = _mm256_load_ps((const float*)&pMat[pSP[2].jid]), pm3xy = _mm256_load_ps((const float*)&pMat[pSP[3].jid]);
+		const __m256 pm01zz = _mm256_set_m128(pMat[pSP[1].jid + 2], pMat[pSP[0].jid + 2]),
+			pm23zz = _mm256_set_m128(pMat[pSP[3].jid + 2], pMat[pSP[2].jid + 2]),
+			pm01xx = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x20), pm01yy = _mm256_permute2f128_ps(pm0xy, pm1xy, 0x31),
+			pm23xx = _mm256_permute2f128_ps(pm2xy, pm3xy, 0x20), pm23yy = _mm256_permute2f128_ps(pm2xy, pm3xy, 0x31);
+		const __m256 dat = _mm256_broadcast_ps((const __m128*)&pt);
+		const __m256 tmp01 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[1].weight), _mm_set1_ps(pSP[0].weight))/*weight for 01*/,
+			_mm256_blend_ps
+			(
+				_mm256_blend_ps(_mm256_dp_ps(dat, pm01xx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pm01yy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pm01zz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		const __m256 tmp23 = _mm256_mul_ps
+		(
+			_mm256_set_m128(_mm_set1_ps(pSP[3].weight), _mm_set1_ps(pSP[2].weight))/*weight for 23*/,
+			_mm256_blend_ps
+			(
+				_mm256_blend_ps(_mm256_dp_ps(dat, pm23xx, 0xf1)/*x000;x000*/, _mm256_dp_ps(dat, pm23yy, 0xf2)/*0y00,0y00*/, 0b10101010)/*xy00,xy00*/,
+				_mm256_dp_ps(dat, pm23zz, 0xf4)/*00z0,00z0*/, 0b11001100
+			)/*x0,y0,z0,0;x1,y1,z1,0*/
+		);
+		const __m256 tmp = _mm256_add_ps(tmp01, tmp23);
+		pt.assign(_mm_add_ps(_mm256_castps256_ps128(tmp), _mm256_extractf128_ps(tmp, 1)));
 	}
 }
 
@@ -1336,7 +1455,7 @@ void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, 
 		M(i) = aRBM*M(i);
 	M(0) = aRBM;
 }
-CMesh::MotionMat CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles)
+CMesh::MotionMat CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const double * const aJAngles) const
 {
 	using miniBLAS::SQMat4x4;
 
@@ -1589,57 +1708,6 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 //	}
 //	timer.Stop();
 //	functime[2] += timer.ElapseNs(); funccount[2]++;
-//}
-//void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
-//{
-//	SimpleTimer timer;
-//	//row * col(3) * z(20 = 5Vertex)
-//	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-//	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
-//	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
-//	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-//	const Vertex *__restrict pEvec = &(*evecCache)[0];
-//	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
-//	{
-//		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-//		const __m256 addA = _mm256_add_ps
-//		(
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
-//				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
-//				0b00100010),
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
-//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
-//				0b01000100)
-//		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
-//		const __m256 addB = _mm256_add_ps
-//		(
-//			_mm256_add_ps(
-//				_mm256_blend_ps(
-//					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
-//					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
-//				_mm256_insertf128_ps(
-//					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
-//					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
-//			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
-//				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
-//				0b00100010)
-//		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
-//		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
-//		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
-//		vPoints[row].assign(newval);
-//
-//		if (validMask[row] != 0)
-//			validPts.push_back(newval);
-//	}
-//	timer.Stop();
-//	functime[3] += timer.ElapseNs(); funccount[3]++;
 //}
 
 int CMesh::updateJntPos()

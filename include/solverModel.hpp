@@ -79,20 +79,15 @@ struct EarlyCutCostFunctor
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose;
-	const PtrModSmooth mSmooth; 
-	const std::vector<int8_t> isValid;
 	const std::vector<float> weights;
 	const VertexVec& scanCache;
 	uint32_t count;
-	EarlyCutCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
-		const miniBLAS::VertexVec& scanCache_)
-		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())),
-		isValid(isValid_), weights(weights_), scanCache(scanCache_), count(scanCache_.size())
+	EarlyCutCostFunctor(const CShapePose *shapepose_, const std::vector<float>& weights_, const miniBLAS::VertexVec& scanCache_)
+		: shapepose(shapepose_), weights(weights_), scanCache(scanCache_), count(scanCache_.size())
 	{
 	}
-	EarlyCutCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
-		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), weights(std::vector<float>(scanCache_.size(), 1.0f)),
-		isValid(isValid_), scanCache(scanCache_), count(scanCache_.size())
+	EarlyCutCostFunctor(const CShapePose *shapepose_, const miniBLAS::VertexVec& scanCache_)
+		: shapepose(shapepose_), weights(std::vector<float>(scanCache_.size(), 1.0f)), scanCache(scanCache_), count(scanCache_.size())
 	{
 	}
 public:
@@ -118,16 +113,16 @@ protected:
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose2(mSmooth, baseMesh, pose, isValid.data());
+		return shapepose->getModelByPose2(baseMesh, pose);
 	}
 	PoseCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
-		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, isValid_, scanCache_), 
+		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, scanCache_), 
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
 	{
 	}
 	PoseCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_,
 		const std::vector<float>& weights_)
-		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, isValid_, weights_, scanCache_),
+		: EarlyCutCostFunctor<PoseCostEC>(shapepose_, weights_, scanCache_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
 	{
 	}
@@ -136,13 +131,16 @@ struct ShapeCostEC : public EarlyCutCostFunctor<ShapeCostEC>
 {
 protected:
 	const ModelParam::PoseParam pose;
+	const PtrModSmooth mSmooth;
+	const std::vector<int8_t> isValid;
 public:
 	inline VertexVec getPts(const double* shape) const
 	{
 		return shapepose->getModelFast2(mSmooth, shape, pose.data(), isValid.data());
 	}
 	ShapeCostEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
-		: EarlyCutCostFunctor<ShapeCostEC>(shapepose_, isValid_, scanCache_), pose(modelParam.pose)
+		: EarlyCutCostFunctor<ShapeCostEC>(shapepose_, scanCache_), pose(modelParam.pose),
+		mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_)
 	{
 	}
 };
@@ -154,20 +152,18 @@ struct EarlyCutP2SCostFunctor
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose;
-	const PtrModSmooth mSmooth;
-	const std::vector<int8_t> isValid;
 	VertexVec scanCache;
 	const VertexVec normCache;
 	uint32_t count;
-	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
+	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const std::vector<float>& weights_, 
 		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
-		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
+		: shapepose(shapepose_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
 	{
 		for (uint32_t idx = 0; idx < count; ++idx)
 			scanCache[idx].w = weights_[idx];
 	}
-	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
-		: shapepose(shapepose_), mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
+	EarlyCutP2SCostFunctor(const CShapePose *shapepose_, const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
+		: shapepose(shapepose_), scanCache(scanCache_), normCache(normCache_), count(scanCache_.size())
 	{
 		for (uint32_t idx = 0; idx < count; ++idx)
 			scanCache[idx].w = 1.0f;
@@ -198,11 +194,11 @@ protected:
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose2(mSmooth, baseMesh, pose, isValid.data());
+		return shapepose->getModelByPose2(baseMesh, pose);
 	}
 	PoseCostP2SEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const std::vector<float>& weights_,
 		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
-		: EarlyCutP2SCostFunctor<PoseCostP2SEC>(shapepose_, isValid_, weights_, scanCache_, normCache_),
+		: EarlyCutP2SCostFunctor<PoseCostP2SEC>(shapepose_, weights_, scanCache_, normCache_),
 		baseMesh(shapepose_->getBaseModel2(modelParam.shape.data(), isValid_.data()))
 	{
 	}
@@ -211,6 +207,8 @@ struct ShapeCostP2SEC : public EarlyCutP2SCostFunctor<ShapeCostP2SEC>
 {
 protected:
 	const ModelParam::PoseParam pose;
+	const PtrModSmooth mSmooth;
+	const std::vector<int8_t> isValid;
 public:
 	inline VertexVec getPts(const double* shape) const
 	{
@@ -218,7 +216,8 @@ public:
 	}
 	ShapeCostP2SEC(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_,
 		const miniBLAS::VertexVec& scanCache_, const VertexVec& normCache_)
-		: EarlyCutP2SCostFunctor<ShapeCostP2SEC>(shapepose_, isValid_, scanCache_, normCache_), pose(modelParam.pose)
+		: EarlyCutP2SCostFunctor<ShapeCostP2SEC>(shapepose_, scanCache_, normCache_), pose(modelParam.pose),
+		mSmooth(shapepose_->preCompute(isValid_.data())), isValid(isValid_)
 	{
 	}
 };

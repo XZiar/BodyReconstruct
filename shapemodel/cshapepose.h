@@ -19,8 +19,7 @@ public:
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn) const;
 	CMesh getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const;
 	miniBLAS::VertexVec getModelByPose(const miniBLAS::VertexVec& basePoints, const double *__restrict poseParamsIn) const;
-	miniBLAS::VertexVec getModelByPose2(const PtrModSmooth mSmooth, const CMesh& baseMesh, const double *__restrict poseParamsIn,
-		const int8_t *__restrict validMask) const;
+	miniBLAS::VertexVec getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelFast2(const PtrModSmooth mSmooth, const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn,
 		const int8_t *__restrict validMask) const;
