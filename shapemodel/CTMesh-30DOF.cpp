@@ -200,6 +200,59 @@ CJoint& CJoint::operator=(CJoint& aCopyFrom)
 	return *this;
 }
 
+
+
+
+miniBLAS::SQMat4x4 CJointEx::angleToMatrixEx(const float aAngle) const
+{
+	using miniBLAS::SQMat3x3;
+	using miniBLAS::SQMat4x4;
+	__m128 /*omegaT(i, j) = mDirection(i)*mDirection(j)*/
+		omegaT0 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(0, 0, 0, 0))),
+		omegaT1 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(1, 1, 1, 1))),
+		omegaT2 = _mm_mul_ps(vDir, _mm_permute_ps(vDir, _MM_SHUFFLE(2, 2, 2, 2)));
+	const SQMat3x3 omegaHat(_mm_set_ps(0, vDir.y, -vDir.z, 0), _mm_set_ps(0, -vDir.x, 0, vDir.z), _mm_set_ps(0, 0, vDir.x, -vDir.y));
+
+
+	const __m128 oh00 = _mm_dp_ps(omegaHat[0], omegaHat[0], 0x77), oh01 = _mm_dp_ps(omegaHat[0], omegaHat[1], 0x77),
+		oh02 = _mm_dp_ps(omegaHat[0], omegaHat[2], 0x77), oh11 = _mm_dp_ps(omegaHat[1], omegaHat[1], 0x77),
+		oh12 = _mm_dp_ps(omegaHat[1], omegaHat[2], 0x77), oh22 = _mm_dp_ps(omegaHat[2], omegaHat[2], 0x77);
+	SQMat3x3 RB(_mm_blend_ps(_mm_blend_ps(oh00, oh01, 0b010), oh02, 0b100),
+		_mm_blend_ps(_mm_blend_ps(oh01, oh11, 0b010), oh12, 0b100),
+		_mm_blend_ps(_mm_blend_ps(oh02, oh12, 0b010), oh22, 0b100));
+
+	/*R = (omegaHat*(float)sin(aAngle)) + ((omegaHat*omegaHat)*(float)(1.0 - cos(aAngle)));*/
+	const SQMat3x3 R = omegaHat*std::sin(aAngle) - RB*(1.0f - std::cos(aAngle));
+
+	/*t = T*(mDirection / mMoment) + ((omegaT*mMoment)*aAngle);*/
+	//const __m256 t2 = miniBLAS::Mat3x3_Mul2_Vec3(omegaT0, omegaT1, omegaT2, vMom, R[0], R[1], R[2], vDM)/*om;R*/;
+	//__m128 t = _mm_sub_ps(
+	//	_mm_mul_ps(_mm256_castps256_ps128(t2)/*om*/, _mm_set_ps1(aAngle)),
+	//	_mm256_extractf128_ps(t2, 1));
+	__m128 t = miniBLAS::Mat3x3_Mul_Vec3(R[0], R[1], R[2], vDM),
+		tB = miniBLAS::Mat3x3_Mul_Vec3(omegaT0, omegaT1, omegaT2, vMom);
+	t = _mm_sub_ps(_mm_mul_ps(tB, _mm_set_ps1(aAngle)), t);
+	/*
+	{
+	printf("R---compare-R\n");
+	const float *oR = (float*)&R0, *nR = (float*)&R[0];
+	printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+	oR = (float*)&R1, nR = (float*)&R[1];
+	printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+	oR = (float*)&R2, nR = (float*)&R[2];
+	printf("oldR  %e,%e,%e \t newR  %e,%e,%e\n", oR[0], oR[1], oR[2], nR[0], nR[1], nR[2]);
+	}*/
+
+	const static __m128 ones = _mm_set_ps1(1);
+	SQMat4x4 M = R + SQMat4x4(true);
+	M[0] = _mm_insert_ps(M[0], t, 0b00110000)/*x,y,z,tx*/;
+	M[1] = _mm_insert_ps(M[1], t, 0b01110000)/*x,y,z,ty*/;
+	M[2] = _mm_insert_ps(M[2], t, 0b10110000)/*x,y,z,tz*/;
+	M[3] = _mm_set_ps(1, 0, 0, 0);
+	return M;
+}
+
+
 // C M E S H M O T I O N -------------------------------------------------------
 
 // reset
@@ -276,7 +329,6 @@ void CMesh::operator=(const CMesh& aMesh)
 	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
 
 	evecCache = aMesh.evecCache;
-	evecCache2 = aMesh.evecCache2;
 	//wgtMat = aMesh.wgtMat;
 	wMatGap = aMesh.wMatGap;
 	sh2jnt = aMesh.sh2jnt;
@@ -286,58 +338,23 @@ void CMesh::operator=(const CMesh& aMesh)
 CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 {
 	isCopy = true;
-	//mJointNumber = from.mJointNumber;
 	mNumPoints = from.mNumPoints;
 
-	mBounds = from.mBounds;
-	mCenter = from.mCenter;
-	mJoint = from.mJoint;
 	mJointMap = from.mJointMap;
-	mNeighbor = from.mNeighbor;
-	mEndJoint = from.mEndJoint;
-	mCovered = from.mCovered;
-	mExtremity = from.mExtremity;
 	mInfluencedBy = from.mInfluencedBy;
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
-	evecCache2 = from.evecCache2;
 	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
-
+	vJoint = from.vJoint;
 	if (pointsIn == nullptr)
 		vPoints = from.vPoints;
 	else
 		vPoints = *pointsIn;
 }
 
-CMesh::CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmooth)
-{
-	isCopy = true;
-	//mJointNumber = from.mJointNumber;
-	mNumPoints = from.mNumPoints;
-
-	mBounds = from.mBounds;
-	mCenter = from.mCenter;
-	mJoint = from.mJoint;
-	mJointMap = from.mJointMap;
-	mNeighbor = from.mNeighbor;
-	mEndJoint = from.mEndJoint;
-	mCovered = from.mCovered;
-	mExtremity = from.mExtremity;
-	mInfluencedBy = from.mInfluencedBy;
-
-	//avoid overhead of copying data unecessarily
-	evecCache = from.evecCache;
-	evecCache2 = from.evecCache2;
-	wMatGap = from.wMatGap;
-	sh2jnt = from.sh2jnt;
-
-	modsmooth = msmooth;
-	vPoints = baseMesh.vPoints;
-	validPts = baseMesh.validPts;
-}
 CMesh::CMesh(const bool isFastCopy, const CMesh& from)
 {
 	if (!isFastCopy)
@@ -348,22 +365,15 @@ CMesh::CMesh(const bool isFastCopy, const CMesh& from)
 	isCopy = true;
 	mNumPoints = from.mNumPoints;
 
-	mBounds = from.mBounds;
-	mCenter = from.mCenter;
-	mJoint = from.mJoint;
 	mJointMap = from.mJointMap;
-	mNeighbor = from.mNeighbor;
-	mEndJoint = from.mEndJoint;
-	mCovered = from.mCovered;
-	mExtremity = from.mExtremity;
 	mInfluencedBy = from.mInfluencedBy;
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
-	evecCache2 = from.evecCache2;
 	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
+	vJoint = from.vJoint;
 	vPoints = from.vPoints;
 	validPts = from.validPts;
 }
@@ -621,43 +631,29 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 		exit(-1);
 	}
 	const uint32_t gap = evectorsIn.n_elem / 3;
-	evecCache->resize(EVALUATE_POINTS_NUM * 16);//15+1 vertex for a row
-	float *pVert = (*evecCache)[0];
-	//20 * x(rows*3)
-	const double *px = evectorsIn.memptr(), *py = px + gap, *pz = py + gap;
-	for (uint32_t a = 0; a < EVALUATE_POINTS_NUM; ++a)
-	{
-		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
-			*pVert++ = *px++;
-		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
-			*pVert++ = *py++;
-		for (uint32_t b = 0; b < SHAPEPARAM_NUM; ++b)
-			*pVert++ = *pz++;
-		pVert += 4;
-	}
 	{
 		uint32_t i = 0;
-		evecCache2->resize(EVALUATE_POINTS_NUM * SHAPEPARAM_NUM * 3 / 4);
+		evecCache->resize(EVALUATE_POINTS_NUM * SHAPEPARAM_NUM * 3 / 4);
 		for (uint32_t pn = 0; pn < SHAPEPARAM_NUM; pn += 4)
 		{
 			const double *tpx = evectorsIn.memptr() + pn, *tpy = tpx + gap, *tpz = tpy + gap;
 			for (uint32_t ptn = EVALUATE_POINTS_NUM / 4; ptn--;)
 			{
 				//4 points a group---2AVX
-				evecCache2->at(i++).load<4>(tpx);
-				evecCache2->at(i++).load<4>(tpx + 20);
-				evecCache2->at(i++).load<4>(tpx + 40);
-				evecCache2->at(i++).load<4>(tpx + 60);
+				evecCache->at(i++).load<4>(tpx);
+				evecCache->at(i++).load<4>(tpx + 20);
+				evecCache->at(i++).load<4>(tpx + 40);
+				evecCache->at(i++).load<4>(tpx + 60);
 				tpx += SHAPEPARAM_NUM * 4;
-				evecCache2->at(i++).load<4>(tpy);
-				evecCache2->at(i++).load<4>(tpy + 20);
-				evecCache2->at(i++).load<4>(tpy + 40);
-				evecCache2->at(i++).load<4>(tpy + 60);
+				evecCache->at(i++).load<4>(tpy);
+				evecCache->at(i++).load<4>(tpy + 20);
+				evecCache->at(i++).load<4>(tpy + 40);
+				evecCache->at(i++).load<4>(tpy + 60);
 				tpy += SHAPEPARAM_NUM * 4;
-				evecCache2->at(i++).load<4>(tpz);
-				evecCache2->at(i++).load<4>(tpz + 20);
-				evecCache2->at(i++).load<4>(tpz + 40);
-				evecCache2->at(i++).load<4>(tpz + 60);
+				evecCache->at(i++).load<4>(tpz);
+				evecCache->at(i++).load<4>(tpz + 20);
+				evecCache->at(i++).load<4>(tpz + 40);
+				evecCache->at(i++).load<4>(tpz + 60);
 				tpz += SHAPEPARAM_NUM * 4;
 			}
 		}
@@ -666,6 +662,11 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 
 void CMesh::prepareData()
 {
+	{
+		//copy joints
+		for (uint32_t a = 0; a < MotionMatCnt; ++a)
+			vJoint[a] = mJoint[a];
+	}
 	{//prepare weightMatrix
 		wMatGap = (mNumPoints + 3) / 4;
 		if (wMatGap & 0x1)
@@ -689,9 +690,8 @@ void CMesh::prepareData()
 			for (uint32_t a = 0; a < wMatGap; va += 2, vb += 2, a += 2)
 			{
 				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb))/*01234567*/;
-				const bool isValid = _mm256_movemask_ps(_mm256_cmp_ps(minM, helper_zero, _CMP_NEQ_OQ));
-				if (isValid)//pre-compute matrix for updJoints
-				{
+				if (_mm256_movemask_ps(_mm256_cmp_ps(minM, helper_zero, _CMP_NEQ_OQ)))//has non-zero param
+				{//pre-compute matrix for updJoints
 					sumvec = _mm256_add_ps(sumvec, minM);//accumulate weights
 					__m256 mA = _mm256_permute_ps(minM, 0b10001101)/*13025746*/;
 					__m256 mB = _mm256_permute_ps(minM, 0b11011000)/*02134657*/;
@@ -1469,7 +1469,8 @@ CMesh::MotionMat CMesh::angleToMatrixEx(const CMatrix<float>& aRBM, const double
 	for (int ii = mJointNumber; ii--;)
 	{
 		uint32_t id = ids[ii];
-		auto Mi = mJoint(id).angleToMatrixEx(aJAngles[id + 5]);
+		//auto Mi = mJoint(id).angleToMatrixEx(aJAngles[id + 5]);
+		auto Mi = vJoint[id].angleToMatrixEx(aJAngles[id + 5]);
 
 		for (int jj = 0; jj < mJointNumber; jj++)
 		{
@@ -1518,6 +1519,14 @@ bool CMesh::isParentOf(int aParentJointID, int aJointID)
 	if (mJoint(aJointID).mParent == aParentJointID) return true;
 	return isParentOf(aParentJointID, mJoint(aJointID).mParent);
 }
+bool CMesh::isParentOfEx(int aParentJointID, int aJointID)
+{
+	if (aJointID == 0) 
+		return false;
+	if (vJoint[aJointID].mParent == aParentJointID) 
+		return true;
+	return isParentOf(aParentJointID, mJoint[aJointID].mParent);
+}
 
 int CMesh::shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors)
 {
@@ -1553,45 +1562,6 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
-{
-	//row * col(3) * z(20 = 5Vertex)
-	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-	const Vertex *__restrict pEvec = &(*evecCache)[0];
-	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
-	{
-		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
-		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-		const __m128 add01 = _mm_add_ps
-		(
-			_mm_load_ps(vPoints[row])/*x,y,z,?*/,
-			_mm_blend_ps(_mm_dp_ps(sp1, pEvec[0], 0b11110001)/*sx1,0,0,0*/, _mm_dp_ps(sp1, pEvec[5], 0b11110010)/*0,sy1,0,0*/, 0b10)/*sx1,sy1,0,0*/
-		);
-		const __m128 add23 = _mm_add_ps
-		(
-			_mm_blend_ps(_mm_dp_ps(sp2, pEvec[1], 0b11110001)/*sx2,0,0,0*/, _mm_dp_ps(sp2, pEvec[6], 0b11110010)/*0,sy2,0,0*/, 0b10)/*sx2,sy2,0,0*/,
-			_mm_blend_ps(_mm_dp_ps(sp3, pEvec[2], 0b11110001)/*sx3,0,0,0*/, _mm_dp_ps(sp3, pEvec[7], 0b11110010)/*0,sy3,0,0*/, 0b10)/*sx3,sy3,0,0*/
-		);
-		const __m128 add45 = _mm_add_ps
-		(
-			_mm_blend_ps(_mm_dp_ps(sp4, pEvec[3], 0b11110001)/*sx4,0,0,0*/, _mm_dp_ps(sp4, pEvec[8], 0b11110010)/*0,sy4,0,0*/, 0b10)/*sx4,sy4,0,0*/,
-			_mm_blend_ps(_mm_dp_ps(sp5, pEvec[4], 0b11110001)/*sx5,0,0,0*/, _mm_dp_ps(sp5, pEvec[9], 0b11110010)/*0,sy5,0,0*/, 0b10)/*sx5,sy5,0,0*/
-		);
-		const __m128 addz = _mm_add_ps
-		(
-			_mm_add_ps(_mm_dp_ps(sp1, pEvec[10], 0b11110100)/*0,0,sz1,0*/, _mm_dp_ps(sp2, pEvec[11], 0b11110100)/*0,0,sz2,0*/),
-			_mm_add_ps(_mm_dp_ps(sp3, pEvec[12], 0b11110100)/*0,0,sz3,0*/, _mm_dp_ps(sp4, pEvec[13], 0b11110100)/*0,0,sz4,0*/)
-		);
-		vPoints[row].assign(_mm_add_ps
-		(
-			_mm_dp_ps(sp5, pEvec[14], 0b11110100)/*0,0,sz5,0*/,
-			_mm_add_ps(_mm_add_ps(add01, add23), _mm_add_ps(add45, addz))
-		));
-	}
-}
 /*
 void CMesh::NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
@@ -1628,7 +1598,7 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 {
 	SimpleTimer timer;
 	//5 * row(EVALUATE_POINTS_NUM/2) * 3(xyz) * 4(4param)
-	const float *__restrict pEc = (float*)evecCache2->data();
+	const float *__restrict pEc = (float*)evecCache->data();
 	for (uint32_t pn = 0; pn < SHAPEPARAM_NUM / 4; pn++)
 	{
 		const __m256 param = _mm256_set_m128(shapeParamsIn[pn], shapeParamsIn[pn]);
@@ -1843,8 +1813,8 @@ void CMesh::updateJntPosEx()
 {
 	SimpleTimer timer;
 	timer.Start();
-	CMatrix<float> newJntPos(mJointNumber, 3);//3D joints
-	CMatrix<float> joints0(mJointNumber, mJointNumber * 3);
+	Vertex tmpJntPos[mJointNumber];
+	memset(&tmpJntPos, 0x0, sizeof(tmpJntPos));
 
 	uint32_t mIdx = 0;
 	for (const uint8_t(&item)[3] : idxmap)
@@ -1870,62 +1840,22 @@ void CMesh::updateJntPosEx()
 			sumPos = _mm256_add_ps(sumPos, _mm256_add_ps(tmpA, tmpB));
 		}
 		sumPos = _mm256_add_ps(sumPos, _mm256_permute2f128_ps(sumPos, sumPos, 0b00000001));
-		const Vertex puter(_mm256_castps256_ps128(sumPos));
-		joints0.putToY3(puter, item[0], item[2]);
+		tmpJntPos[item[0]] = _mm256_castps256_ps128(sumPos);
 	}
-
-	const static Vertex sum(true);
-	newJntPos.putToY3(sum, 0, 0);
-
-	int parentMap[50]; // jNo=(jId -1) (to)---> parent jId
-	for (unsigned int i0 = 0; i0 < mJointNumber; i0++)
-	{
-		int jId = i0 + 1;
-		parentMap[i0] = mJoint(jId).mParent;
+	{//copy joint pos
+		tmpJntPos[1] = tmpJntPos[2];
+		tmpJntPos[5] = tmpJntPos[6];
+		tmpJntPos[9] = tmpJntPos[10];
+		tmpJntPos[12] = tmpJntPos[14];
+		tmpJntPos[13] = tmpJntPos[14];
+		tmpJntPos[17] = tmpJntPos[19];
+		tmpJntPos[18] = tmpJntPos[19];
+		tmpJntPos[22] = tmpJntPos[6];
+		tmpJntPos[23] = tmpJntPos[2];
+		tmpJntPos[24] = tmpJntPos[10];
 	}
-
-	parentMap[2] = 1;
-	parentMap[3] = 3;
-	parentMap[5] = 5;
-	parentMap[6] = 1;
-	parentMap[7] = 7;
-	parentMap[8] = 8;
-	parentMap[9] = 9;
-	parentMap[10] = 1;
-	parentMap[14] = 11;
-	parentMap[19] = 11;
-	parentMap[22] = 22;
-	parentMap[23] = 23;
-	parentMap[24] = 24;
-	parentMap[25] = 25;
-
-	const static uint32_t nonRootId[] = { 2,3,4,6,7,8,10,11,14,15,16,19,20,21,22,23,24 };
-	for (const uint32_t id : nonRootId)
-	{
-		const int tmp = (parentMap[id] - 1) * 3;
-		newJntPos(id, 0) = joints0(id, tmp);
-		newJntPos(id, 1) = joints0(id, tmp + 1);
-		newJntPos(id, 2) = joints0(id, tmp + 2);
-	}
-
-	copyJointPos(1, 2, newJntPos);
-	copyJointPos(5, 6, newJntPos);
-	copyJointPos(9, 10, newJntPos);
-	copyJointPos(12, 14, newJntPos);
-	copyJointPos(13, 14, newJntPos);
-	copyJointPos(17, 19, newJntPos);
-	copyJointPos(18, 19, newJntPos);
-	copyJointPos(22, 6, newJntPos);
-	copyJointPos(23, 2, newJntPos);
-	copyJointPos(24, 10, newJntPos);
 	for (uint32_t i0 = 0; i0 < mJointNumber; i0++)
-	{
-		CVector<float> jPos(3);
-		jPos(0) = newJntPos(i0, 0);
-		jPos(1) = newJntPos(i0, 1);
-		jPos(2) = newJntPos(i0, 2);
-		mJoint(i0 + 1).setPoint(jPos);
-	}
+		vJoint[i0 + 1].setPoint(tmpJntPos[i0]);
 	timer.Stop();
 	functime[0] += timer.ElapseNs(); funccount[0]++;
 }
@@ -2111,7 +2041,7 @@ void CMesh::writeMeshDat(std::string fname)
 {
 	NShow::mLogFile.open(fname.c_str());
 	char buffer[10000];
-	sprintf(buffer, "%d %d %d %d\n", mPoints.size(), mPatch.size(), mJointNumber, mNoOfBodyParts);
+	sprintf(buffer, "%zu %zu %d %d\n", mPoints.size(), mPatch.size(), mJointNumber, mNoOfBodyParts);
 	NShow::mLogFile << buffer;
 	for (unsigned int i0 = 0; i0 < mNumPoints; i0++)
 	{

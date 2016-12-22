@@ -66,19 +66,20 @@ int main(int argc, char *argv[])
 	//input object scan file
 	{
 		printf("FileName(number for one scan, letter for sequence): ");
-		int ret = getchar();
-		if (!(ret == 13 || ret == 10) && !isVtune)
-		{
-			getchar();
-			if (ret >= '0' && ret <= '9')
-				meshFittor.init(string("scan") + (char)ret, true);
-			else
-				meshFittor.init(string("/clips/clouds") + (char)ret, false);
-		}
+		string ifn;
+		cin >> ifn;
+		getchar();
+		bool isSingle = true;
+		for(const auto& ch : ifn)
+			if (ch < '0' || ch > '9')
+			{
+				isSingle = false;
+				break;
+			}
+		if(isSingle)
+			meshFittor.init(ifn, "scan" + ifn, true);
 		else
-		{
-			meshFittor.init("scan", true);
-		}
+			meshFittor.init(ifn, "/clips/clouds" + ifn, false);
 	}
     meshFittor.mainProcess();
 	if (!isVtune)

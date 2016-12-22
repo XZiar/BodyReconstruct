@@ -72,13 +72,53 @@ public:
 	CJoint& operator=(CJoint& aCopyFrom);
 	// Parent joint
 	int mParent;
+	miniBLAS::Vertex vDir, vPoint, vMom, vDM;
 protected:
 	// Defines joint's position and axis
 	CVector<float> mDirection;
 	CVector<float> mPoint;
 	CVector<float> mMoment;
-	miniBLAS::Vertex vDir, vPoint, vMom, vDM;
 };
+ALIGN16 struct CJointEx
+{
+public:
+	// constructor
+	CJointEx() { };
+	CJointEx& operator=(const CJoint& from)
+	{
+		vDir = from.vDir; vPoint = from.vPoint; vMom = from.vMom; vDM = from.vDM; mParent = from.mParent;
+		return *this;
+	};
+	// Constructs the motion matrix from the joint axis and the rotation angle
+	miniBLAS::SQMat4x4 angleToMatrixEx(const float aAngle) const;
+	// Access to joint's position and axis
+	void set(const CVector<float>& aDirection, const CVector<float>& aPoint)
+	{
+		vDir.assign(aDirection.data());
+		vPoint.assign(aPoint.data());
+		vMom = vPoint * vDir; vDM = vDir * vMom;
+	};
+	void setDirection(const CVector<float>& aDirection)
+	{
+		vDir.assign(aDirection.data());
+		vMom = vPoint * vDir; vDM = vDir * vMom;
+	};
+	void setPoint(const miniBLAS::Vertex& pt)
+	{
+		vPoint = pt;
+		vMom = vPoint * vDir; vDM = vDir * vMom;
+	}
+	void setPoint(const CVector<float>& aPoint)
+	{
+		vPoint.assign(aPoint.data());
+		vMom = vPoint * vDir; vDM = vDir * vMom;
+	};
+	// Defines joint's position and axis
+	miniBLAS::Vertex vDir, vPoint, vMom, vDM;
+	// Parent joint
+	int mParent = 0;
+};
+constexpr uint32_t kksize_CJEX = sizeof(CJointEx);
 
 class CMeshMotion
 {
@@ -137,14 +177,12 @@ public:
 	CMesh()
 	{
 		evecCache.reset(new miniBLAS::VertexVec());
-		evecCache2.reset(new miniBLAS::VertexVec());
 		modsmooth.reset(new ModelSmooth());
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
 	CMesh(const CMesh& aMesh) { *this = aMesh; };
 	CMesh(const bool isFastCopy, const CMesh& from);
 	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
-	CMesh(const CMesh& from, const CMesh& baseMesh, const PtrModSmooth msmooth);
 	~CMesh() = default;
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
@@ -154,7 +192,6 @@ public:
 	void printPoints(std::string fname);
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
-	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
 	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	int updateJntPos();
@@ -282,7 +319,6 @@ protected:
 	static const uint8_t idxmap[14][3];
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
-	std::shared_ptr<miniBLAS::VertexVec> evecCache2;
 
 	//miniBLAS::VertexVec wgtMat;
 	uint32_t wMatGap;
@@ -319,6 +355,8 @@ protected:
 	CMeshMotion mCurrentMotion;
 	//CVector<CMeshMotion> mHistory;
 	CVector<CJoint>  mJoint;
+	std::array<CJointEx, MotionMatCnt> vJoint;
+
 	//static std::vector<CMatrix<double> >  eigenVectors;
 	CMatrix<float> weightMatrix;
 
@@ -327,6 +365,7 @@ protected:
 
 	// true if aParentJoint is an ancestor of aJoint
 	bool isParentOf(int aParentJointID, int aJointID);
+	bool isParentOfEx(int aParentJointID, int aJointID);
 	//~aj - small functions, can move elsewhere (think)
 	bool minMLab(CMatrix<float> weightMatrix, int i0, int i1, CVector<float> &minEle);
 	void componet_wise_mul_with_pnts(CVector<float> minEle, CMatrix<float> &tmp_wtMatrix);

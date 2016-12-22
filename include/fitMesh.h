@@ -81,6 +81,8 @@ struct ModelParam
 	ModelParam(const PoseParam& pose_, const ShapeParam& shape_) : pose(pose_), shape(shape_)
 	{
 	};
+	auto Pshape() { return shape.data(); };
+	auto Ppose() { return pose.data(); };
 };
 
 class SimpleLog
@@ -114,12 +116,13 @@ public:
 	std::vector<ModelParam> modelParams;
 
 	volatile uint32_t curFrame = 0;
-	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true, isRefresh = true;
+	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true, isRefresh = true, isShowOrigin = false, isBlockPose = false;
 	SimpleLog logger;
 
 	bool isFastCost = true;
 	bool isRayTrace = false;
 	bool isAngWgt = true;
+	bool isRE = false;
 	bool isReShift = false;
 	bool isP2S = false;
 	bool isShFix = true;
@@ -131,7 +134,7 @@ public:
 	fitMesh(const std::string& dir);
 	~fitMesh();
 	
-	void init(const std::string& baseName, const bool isOnce);
+	void init(const std::string& baseName, const std::string& fileName, const bool isOnce);
 	//The main process of the fitting procedue
 	void mainProcess();
 	//The function of watch the result
@@ -146,7 +149,7 @@ private:
 	double tSPose = 0, tSShape = 0, tMatchNN = 0;
 	uint32_t cSPose = 0, cSShape = 0, cMatchNN = 0;
 
-	std::string baseFName;
+	std::string baseFName, baseEleName;
 	bool mode = true;//true: one scan, false:scan sequence
 	enum ShowMode : uint8_t { None, PointCloud, ColorCloud, Mesh };
 	ShowMode showTMode = ColorCloud;

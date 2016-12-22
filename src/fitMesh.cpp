@@ -398,7 +398,7 @@ bool fitMesh::loadScan(CScan& scan)
 		scan.points = arma::zeros(nSamplePoints, 3);
 		scan.normals = arma::zeros(nSamplePoints, 3);
 		uint32_t i = 0;
-		for (float cur = 0; i < nSamplePoints; cur += step, ++i)
+		for (float cur = 0; i < nSamplePoints && cur < scan.nPoints; cur += step, ++i)
 		{
 			const uint32_t idx = cur;
 			//printf("sample %7d to %7d\n", idx, i);
@@ -431,11 +431,11 @@ void fitMesh::loadTemplate()
 	arma::mat pts;
 	//template.mat should be pre-calculated : meanshape.mat-mean(meanshape)
 	pts.load(dataDir + "template.mat");
-	printf("Template points loaded: %d,%d\n", pts.n_rows, pts.n_cols);
+	printf("Template points loaded: %zu,%zu\n", pts.n_rows, pts.n_cols);
 	
 	arma::mat faces;
 	faces.load(dataDir + "faces.mat");
-	printf("Template faces loaded: %d,%d\n", faces.n_rows, faces.n_cols);
+	printf("Template faces loaded: %zu,%zu\n", faces.n_rows, faces.n_cols);
 	//face index starts from 1
 	faces -= 1;
 
@@ -458,10 +458,10 @@ void fitMesh::loadModel()
 	arma::mat evectors, evalues;
 
 	evectors.load(dataDir + "reduced_evectors.mat");
-	printf("eigen vectors loaded: %d,%d\n", evectors.n_rows, evectors.n_cols);
+	printf("eigen vectors loaded: %zu,%zu\n", evectors.n_rows, evectors.n_cols);
 	evalues.load(dataDir + "evalues.mat");
 	evalues = evalues.cols(0, SHAPEPARAM_NUM - 1);
-	printf("eigen values loaded: %d,%d\n", evalues.n_rows, evalues.n_cols);
+	printf("eigen values loaded: %zu,%zu\n", evalues.n_rows, evalues.n_cols);
 
     shapepose.setEvectors(evectors);
 	shapepose.setEvalues(evalues);
@@ -1175,10 +1175,10 @@ void fitMesh::predictPose()
 
 	cout << "solving...\n";
 	ceres::Solve(option, &probGlobal, &summary);
-	printf("solving global: %d iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
+	printf("solving global: %zu iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
 	//cout << summary.FullReport();
 	ceres::Solve(option, &probJoint, &summary);
-	printf("solving joints: %d iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
+	printf("solving joints: %zu iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
 	//cout << summary.FullReport();
 	
 	//printf("normal predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
@@ -1225,11 +1225,11 @@ void fitMesh::predSoftPose(const bool solveGlobal)
 	if (solveGlobal)
 	{
 		ceres::Solve(option, &probGlobal, &summary);
-		printf("solving global: %d iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
+		printf("solving global: %zu iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
 		//cout << summary.FullReport();
 	}
 	ceres::Solve(option, &probJoint, &summary);
-	printf("solving joints: %d iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
+	printf("solving joints: %zu iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
 	//cout << summary.FullReport();
 
 	//printf("normal predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
@@ -1370,10 +1370,10 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		{
 			type = 1; fwrite(&type, sizeof(type), 1, fp);
 			strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
+			cnt = tempbody.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
 			int32_t *tmp = new int32_t[tempbody.nPoints];
-			for (cnt = 0; cnt < tempbody.nPoints; ++cnt)
-				tmp[cnt] = (isValidNN[cnt] ? idxs[cnt] : 65536);
-			fwrite(&cnt, sizeof(cnt), 1, fp);
+			for (uint32_t cur = 0; cur < tempbody.nPoints; ++cur)
+				tmp[cur] = (isValidNN[cur] ? idxs[cur] : 65536);
 			fwrite(tmp, sizeof(int), cnt, fp);
 			delete[] tmp;
 		}
@@ -1399,7 +1399,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 	timer.Stop();
 	cMatchNN++; tMatchNN += timer.ElapseMs();
 	logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
-
+	char tmpvalid[100000] = { 0 };
 	{
 		//weights = vector<float>(scan.nPoints, 0);
 		weights.clear(); idxs.clear(); ptCache.clear(); normalCache.clear();
@@ -1421,6 +1421,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 				ptCache.push_back(scan.vPts[i]); normalCache.push_back(scan.vNorms[i]);
 				sumVNN++;
 				distAll += nnres.dists[i];
+				tmpvalid[i] = 1;
 			}
 		}
 		err = distAll;
@@ -1450,10 +1451,13 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 		}
 		{
 			type = 1; fwrite(&type, sizeof(type), 1, fp);
-			strcpy(name, "validKNN"); fwrite(name, sizeof(name), 1, fp);
-			cnt = sumVNN;
-			fwrite(&cnt, sizeof(cnt), 1, fp);
-			fwrite(&weights[0], sizeof(int), cnt, fp);
+			strcpy(name, "reKNN"); fwrite(name, sizeof(name), 1, fp);
+			cnt = scan.nPoints; fwrite(&cnt, sizeof(cnt), 1, fp);
+			int32_t *tmp = new int32_t[scan.nPoints];
+			for (uint32_t cur = 0, a = 0; cur < scan.nPoints; ++cur)
+				tmp[cur] = (tmpvalid[cur] ? idxs[a++] : 65536);
+			fwrite(tmp, sizeof(int), cnt, fp);
+			delete[] tmp;
 		}
 		fclose(fp);
 		printf("save Re-KNN data to file successfully.\n");
@@ -1540,13 +1544,15 @@ void fitMesh::showResult(const CScan& scan, const bool showScan, const vector<ui
 	viewer.showCloud(cloud);
 }
 
-void fitMesh::init(const std::string& baseName, const bool isOnce)
+void fitMesh::init(const std::string& baseName, const std::string& fileName, const bool isOnce)
 {
 	mode = isOnce;
-	baseFName = baseName;
+	baseFName = fileName;
+	baseEleName = baseName;
 	//isShFix = yesORno("fix shoulder?");
 	//isFastCost = yesORno("use fast cost func?");
 	isP2S = yesORno("use Point<->surface calculation?");
+	isRE = yesORno("use Reverse version of fit?");
 	angleLimit = inputNumber("angle limit", 30);
 	//isRayTrace = yesORno("use ray trace to cut?");
 	//isAngWgt = yesORno("use weight on angles?");
@@ -1587,7 +1593,10 @@ void fitMesh::mainProcess()
 		option.use_nonmonotonic_steps = true;
 		for (uint32_t a = 0; a < 10; ++a)
 			fitparams.push_back(FitParam{ true, true, 0, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
-		fitShapePose(firstScan, fitparams);
+		if (isRE)
+			fitShapePoseRe(firstScan, fitparams);
+		else
+			fitShapePose(firstScan, fitparams);
 		modelParams.push_back(curMParam);
 		bakMParam = curMParam;
 	}
@@ -1598,10 +1607,12 @@ void fitMesh::mainProcess()
 		printf("m2sCut : per %lld ns\n", CMesh::functime[3] / CMesh::funccount[3]);
 	}
 	if (mode || isVtune)//only once
+	{
+		saveMParam(buildName(0));
 		return;
-	const bool useRE = yesORno("use RE version of fit?");
-	if (useRE)
-		isReShift = yesORno("use ReMin for aloowing shift?");
+	}
+	if (isRE)
+		isReShift = yesORno("use ReMin for allowing shift?");
 	int leastframe = inputNumber("at least fit to which frame?", 0);
 	{
 		//prepare fit params
@@ -1628,7 +1639,7 @@ void fitMesh::mainProcess()
 		curScan.nntree.MAXDist2 = tempbody.nntree.MAXDist2 = 5e3f;
 		if (curFrame > 3)
 			predictPose();
-		if (useRE)
+		if (isRE)
 			fitShapePoseRe(curScan, fitparams);
 		else
 			fitShapePose(curScan, fitparams);
@@ -1678,10 +1689,7 @@ void fitMesh::mainProcess()
 }
 std::string fitMesh::buildName(const uint32_t frame)
 {
-	string fname("params_");
-	fname += baseFName.back();
-	fname += "_f" + std::to_string(frame);
-	return fname;
+	return "params_" + baseEleName + "_f" + std::to_string(frame);
 }
 bool fitMesh::saveMParam(const std::string& fname)
 {
@@ -1690,7 +1698,7 @@ bool fitMesh::saveMParam(const std::string& fname)
 	FILE *fp = fopen(csvname.c_str(), "w");
 	if (fp != nullptr)
 	{
-		fprintf(fp, "MODEL_PARAMS,%d frames,\n,\n", modelParams.size());
+		fprintf(fp, "MODEL_PARAMS,%zu frames,\n,\n", modelParams.size());
 
 		fprintf(fp, "POSE_PARAM,\n,");
 		for (uint32_t a = 0; a < POSPARAM_NUM;)
@@ -1837,6 +1845,12 @@ void fitMesh::watch()
 			case "Down"_hash:
 				cthis.showTMode = ShowMode((uint8_t(cthis.showTMode) + 3) % 4);
 				cthis.isRefresh = true; break;
+			case "o"_hash:
+				cthis.isShowOrigin = !cthis.isShowOrigin;
+				cthis.isRefresh = true; break;
+			case "p"_hash:
+				cthis.isBlockPose = !cthis.isBlockPose;
+				cthis.isRefresh = true; break;
 			}
 		}
 	}, this);
@@ -1881,7 +1895,15 @@ void fitMesh::showFrame(const uint32_t frame)
 {
 	if (frame >= scanFrames.size())
 		return;
-	tempbody.updPoints(shapepose.getModelFast(modelParams[frame].shape.data(), modelParams[frame].pose.data()));
+	if (isShowOrigin)
+		tempbody.updPoints(shapepose.getBaseModel(modelParams[frame].Pshape()));
+	else if (isBlockPose)
+	{
+		ModelParam tmpmp; tmpmp.shape = modelParams[frame].shape;
+		tempbody.updPoints(shapepose.getModelFast(tmpmp.Pshape(), tmpmp.Ppose()));
+	}
+	else
+		tempbody.updPoints(shapepose.getModelFast(modelParams[frame].Pshape(), modelParams[frame].Ppose()));
 	tempbody.calcFaces();
 	tempbody.calcNormalsEx();
 	printFrame(frame);
