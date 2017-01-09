@@ -107,6 +107,7 @@ inline __m256 Mat3x3_Mul2_Vec3(const __m128 ma0, const __m128 ma1, const __m128 
 }
 
 
+/*make struct's heap allocation align to N bytes boundary*/
 template<uint32_t N>
 struct AlignBase
 {
@@ -128,7 +129,7 @@ struct AlignBase
 	}
 };
 
-
+/*minimun allocator for vector, use T's operator new to alloc space. Should be used with AlignBase*/
 template<class T>
 struct AlignAllocator : std::allocator<T>
 {
@@ -164,7 +165,8 @@ public:
 class ALIGN16 Vertex;
 class ALIGN16 VertexI;
 
-static const uint32_t Vec4Align = 32;
+/*a vector contains 4 element(int32 or float), align to 32 boundary for AVX*/
+static constexpr uint32_t Vec4Align = 32;
 template<typename T>
 class ALIGN16 Vec4Base : public AlignBase<Vec4Align>
 {
@@ -212,7 +214,7 @@ public:
 	};
 };
 
-
+/*vecot contains 4 float, while only xyz are considered in some calculation*/
 class ALIGN16 Vertex :public Vec4Base<float>
 {
 public:
@@ -404,8 +406,8 @@ public:
 };
 using VertexIVec = std::vector<miniBLAS::VertexI, AlignAllocator<miniBLAS::VertexI>>;
 
-
-static const uint32_t SQMat4Align = 32;
+/*4x4matrix contains 4 row of 4elements-vector, align to 32bytes for AVX*/
+static constexpr uint32_t SQMat4Align = 32;
 template<typename T, typename T2>
 class ALIGN32 SQMat4Base : public AlignBase<SQMat4Align>
 {
@@ -459,6 +461,7 @@ protected:
 using __m128x4 = __m128[4];
 using __m256x2 = __m256[2];
 class ALIGN32 SQMat3x3;
+/*4x4 matrix*/
 class ALIGN32 SQMat4x4 :public SQMat4Base<__m128, __m256>
 {
 public:
@@ -551,7 +554,11 @@ public:
 	{
 		return SQMat4x4(_mm256_add_ps(row2[0], m.row2[0]), _mm256_add_ps(row2[1], m.row2[1]));
 	}
-
+	SQMat4x4& operator+=(const SQMat4x4& m)
+	{
+		row2[0] = _mm256_add_ps(row2[0], m.row2[0]); row2[1] = _mm256_add_ps(row2[1], m.row2[1]);
+		return *this;
+	}
 	SQMat4x4 operator-(const SQMat4x4& m) const
 	{
 		return SQMat4x4(_mm256_sub_ps(row2[0], m.row2[0]), _mm256_sub_ps(row2[1], m.row2[1]));
@@ -563,6 +570,7 @@ public:
 	}
 };
 
+/*3x3 matrix, row4's value is not promised while calculation. it would be convert into 4x4 matrix while calc with SQMat4x4*/
 class ALIGN32 SQMat3x3 :public SQMat4x4
 {
 public:

@@ -89,7 +89,7 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape);
+	mesh.fastShapeChangesToMesh(vShape);
 	return std::move(mesh.vPoints);
 }
 CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const
@@ -105,7 +105,7 @@ CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const in
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	baseMesh.fastShapeChangesToMesh_AVX(vShape, validMask);
+	baseMesh.fastShapeChangesToMesh(vShape, validMask);
 	// update joints
 	baseMesh.updateJntPosEx();
 	baseMesh.modsmooth = baseMesh.preCompute(validMask);
@@ -137,7 +137,7 @@ VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *
 VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn) const
 {
 	// Read object model
-	CMesh mesh(true, baseMesh);
+	CMesh mesh(baseMesh, true);
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -167,7 +167,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape);
+	mesh.fastShapeChangesToMesh(vShape);
 
 	// update joints
 	mesh.updateJntPosEx();
@@ -203,7 +203,7 @@ VertexVec CShapePose::getModelFast2(const PtrModSmooth mSmooth,
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh_AVX(vShape, validMask);
+	mesh.fastShapeChangesToMesh(vShape, validMask);
 
 	// update joints
 	mesh.updateJntPosEx();

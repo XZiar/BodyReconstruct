@@ -79,6 +79,10 @@ protected:
 	CVector<float> mPoint;
 	CVector<float> mMoment;
 };
+/*an enhanced class of CJoint
+ *Cjoint is based on CVector, which will cost lots of time when copying(allocate&free heap wastefully)
+ *This version use Vertex instead(data stores on stack)
+ */
 ALIGN16 struct CJointEx
 {
 public:
@@ -113,54 +117,34 @@ public:
 		vPoint.assign(aPoint.data());
 		vMom = vPoint * vDir; vDM = vDir * vMom;
 	};
-	// Defines joint's position and axis
+	// Defines joint's position and axis, vDM is a pre-compute value
 	miniBLAS::Vertex vDir, vPoint, vMom, vDM;
 	// Parent joint
 	int mParent = 0;
 };
 constexpr uint32_t kksize_CJEX = sizeof(CJointEx);
 
-class CMeshMotion
-{
-public:
-	// constructor
-	inline CMeshMotion() { };
-	// Resets the model to zero motion
-	void reset(int aJointNumber);
-	// Shows current configuration
-	void print();
-	// Writes current configuration to file
-	void writeToFile();
-	// Copy operator
-	CMeshMotion& operator=(const CMeshMotion& aCopyFrom);
-	// Access to pose parameters
-	inline float& operator()(int aIndex) const { return mPoseParameters(aIndex); };
-
-	// Main body motion
-	CMatrix<float> mRBM;
-	// Vector with all pose parameters (including joint angles)
-	CVector<float> mPoseParameters;
-};
-
-/* class CAppearanceModel { */
-/* public: */
-/*   inline CAppearanceModel() {}; */
-/*   CVector<int> mLastFrameVisible; */
-/*   CTensor<float> mHistogram; */
-/* }; */
-
-
+/*smooth-params for model
+ *one point could be influenced by many joints(hence it's smooth), each influence is stored in a SmoothParam
+ *put records with 1 joint influenced into ptSmooth first, then 2,3,4joints(a point could be influenced at most 4 joints)
+ *and save the number of records of each type into smtCnt
+ *in fact the data structure could be vector<SmoothParam>[4] for easier understanding
+ *however putting them in a continuous vector may be more friendly to cache
+ */
 struct ModelSmooth
 {
 	struct SmoothParam
 	{
+		//point index
 		uint16_t pid;
+		//joint index
 		uint16_t jid;
 		float weight;
 	};
 	std::vector<SmoothParam> ptSmooth;
 	uint32_t smtCnt[4] = { 0 };
 };
+/*ModelSmooth could be shared in fastcopy of mesh, or other condition, so use shared_ptr to handle it*/
 using PtrModSmooth = std::shared_ptr<ModelSmooth>;
 
 class CMesh
@@ -169,6 +153,7 @@ public:
 	static atomic_uint64_t functime[8];
 	static atomic_uint32_t funccount[8];
 	constexpr static uint32_t mJointNumber = POSPARAM_NUM - 6;
+	//joint index is based on 1, so need to add 1
 	constexpr static uint32_t MotionMatCnt = mJointNumber + 1;
 	using MotionMat = std::array<miniBLAS::SQMat4x4, MotionMatCnt>;
 
@@ -180,21 +165,31 @@ public:
 		modsmooth.reset(new ModelSmooth());
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
-	CMesh(const CMesh& aMesh) { *this = aMesh; };
-	CMesh(const bool isFastCopy, const CMesh& from);
+	CMesh(const CMesh& from, const bool isFastCopy = false);
 	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
 	~CMesh() = default;
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
+	/*pre-compute mesh data based on validmask
+	 *when we can determine some points invalid inmatch(it will not be used in final cost calculation),
+	 *we can avoid calculating these points in rigidMotion step and just output useful points data
+	 *This function compute a new ModelSmooth based on the valid-mask
+	 **/
 	PtrModSmooth preCompute(const int8_t *__restrict validMask) const;
 	void writeMeshDat(std::string fname);
 	void printPoints(std::string fname);
+	//apply shape-params' influences on body's points' pos
 	int shapeChangesToMesh(CVector<float> shapeParams, const std::vector<CMatrix<double> >& eigenVectors);
+	//apply shape-params' influences on body's points' pos
 	void fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t numEigenVectors, const double *eigenVectorsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn);
-	void fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
+	//apply shape-params' influences on body's points' pos
+	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn);
+	//apply shape-params' influences on body's points' pos
+	//This function additionally calculate useful points and store them to validPts
+	void fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask);
 	int updateJntPos();
+	//after shape-params influence mesh points, the joints' actual position will be influenced too, hence need to update their pos
 	void updateJntPosEx();
 	
 	// Reads the mesh from a file
@@ -214,6 +209,7 @@ public:
 	// Apply motion to points
 	void rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smooth = false, bool force = false);
 	void rigidMotionSim_AVX(const MotionMat& M);
+	//this function only calculte useful points(validPts) and stores in validPts
 	void rigidMotionSim2_AVX(const MotionMat& M);
 	void smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X);
 	// Reuses InitMesh to set up Smooth Pose: Global transformation
@@ -262,22 +258,6 @@ public:
 	bool IsCovered(int i) { return mCovered[i]; };
 	bool IsExtremity(int i) { return mExtremity[i]; };
 
-	void projectSurface(CMatrix<float>& aImage, CMatrix<float>& P, int xoffset = 0, int yoffset = 0);
-
-
-	// Projects the mesh to the image plane given the projection matrix P
-	void projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineVal = 255);
-	void projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineVal, int aNodeVal);
-	void projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR = 255, int aLineG = 255, int aLineB = 255);
-	void projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB, int aNodeR, int aNodeG, int aNodeB);
-	// Just project a joint index + neighbor ...
-	void projectToImageJ(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue, int aJoint, int xoffset = 0, int yoffset = 0);
-
-	// Projects all mesh points to the image plane
-	void projectPointsToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aNodeVal = 128);
-	// Projects all mesh points to the image plane and returns the 3-D coordinates of these points
-	void projectPointsToImage(CTensor<float>& a3DCoords, CMatrix<float>& P);
-
 	// Initialization of appearance model
 	//void initializeAppearanceModel(int aFeatureSize, int aViewCount);
 	// Update of appearance model and occlusion detection
@@ -288,10 +268,10 @@ public:
 	// Writes accumulated motion to file
 	//inline void writeAccumulatedMotion() {mAccumulatedMotion.writeToFile();};
 	// Resets accumulated motion to 0
-	inline void resetAccumulation() { mAccumulatedMotion.reset(mJointNumber); };
-	inline void resetCurrentMotion() { mCurrentMotion.reset(mJointNumber); };
+	//inline void resetAccumulation() { mAccumulatedMotion.reset(mJointNumber); };
+	//inline void resetCurrentMotion() { mCurrentMotion.reset(mJointNumber); };
 	// Gives access to current motion
-	inline CMeshMotion& currentMotion() { return mCurrentMotion; };
+	//inline CMeshMotion& currentMotion() { return mCurrentMotion; };
 
 	miniBLAS::VertexVec vPoints;
 	miniBLAS::VertexVec validPts;
@@ -316,12 +296,11 @@ protected:
 			exit(-1);
 		}
 	}
+	//idxmap is used when update joint pos
 	static const uint8_t idxmap[14][3];
 	arma::mat evectors;
 	std::shared_ptr<miniBLAS::VertexVec> evecCache;
 
-	//miniBLAS::VertexVec wgtMat;
-	uint32_t wMatGap;
 	struct ShapeJointParam
 	{
 		miniBLAS::VertexVec influence;
@@ -351,8 +330,8 @@ protected:
 
 	//CMatrix<CAppearanceModel>* mAppearanceField;
 	// CTensor<bool>* mOccluded;
-	CMeshMotion mAccumulatedMotion;
-	CMeshMotion mCurrentMotion;
+	//CMeshMotion mAccumulatedMotion;
+	//CMeshMotion mCurrentMotion;
 	//CVector<CMeshMotion> mHistory;
 	CVector<CJoint>  mJoint;
 	std::array<CJointEx, MotionMatCnt> vJoint;

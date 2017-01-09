@@ -252,44 +252,6 @@ miniBLAS::SQMat4x4 CJointEx::angleToMatrixEx(const float aAngle) const
 	return M;
 }
 
-
-// C M E S H M O T I O N -------------------------------------------------------
-
-// reset
-void CMeshMotion::reset(int aJointNumber)
-{
-	mRBM.setSize(4, 4);
-	mRBM = 0.0;
-	mRBM(0, 0) = 1.0; mRBM(1, 1) = 1.0; mRBM(2, 2) = 1.0; mRBM(3, 3) = 1.0;
-	mPoseParameters.setSize(6 + aJointNumber);
-	mPoseParameters = 0.0;
-}
-
-// print
-void CMeshMotion::print()
-{
-	std::cout << mRBM << std::endl;
-	std::cout << mPoseParameters;
-}
-
-// writeToFile
-void CMeshMotion::writeToFile()
-{
-	//char buffer[200];
-	//sprintf(buffer,"%s%03d.txt",(NShow::mResultDir+"RBM").c_str(),NShow::mImageNo);
-	//mRBM.writeToTXT(buffer);
-	//sprintf(buffer,"%s%03d.txt",(NShow::mResultDir+"Params").c_str(),NShow::mImageNo);
-	//mPoseParameters.writeToTXT(buffer);
-}
-
-// operator =
-CMeshMotion& CMeshMotion::operator=(const CMeshMotion& aCopyFrom)
-{
-	mRBM = aCopyFrom.mRBM;
-	mPoseParameters = aCopyFrom.mPoseParameters;
-	return *this;
-}
-
 // C M E S H -------------------------------------------------------------------
 const uint8_t CMesh::idxmap[14][3] = //i0,i1,i1*3
 { { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 }, { 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
@@ -322,15 +284,13 @@ void CMesh::operator=(const CMesh& aMesh)
 	mJoint = aMesh.mJoint;
 	mInfluencedBy = aMesh.mInfluencedBy;
 
-	mAccumulatedMotion = aMesh.mAccumulatedMotion;
-	mCurrentMotion = aMesh.mCurrentMotion;
+	//mAccumulatedMotion = aMesh.mAccumulatedMotion;
+	//mCurrentMotion = aMesh.mCurrentMotion;
 
 	weightMatrix = aMesh.weightMatrix;
 	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
 
 	evecCache = aMesh.evecCache;
-	//wgtMat = aMesh.wgtMat;
-	wMatGap = aMesh.wMatGap;
 	sh2jnt = aMesh.sh2jnt;
 	vPoints = aMesh.vPoints;
 }
@@ -345,7 +305,6 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
-	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
 	vJoint = from.vJoint;
@@ -355,7 +314,7 @@ CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
 		vPoints = *pointsIn;
 }
 
-CMesh::CMesh(const bool isFastCopy, const CMesh& from)
+CMesh::CMesh(const CMesh& from, const bool isFastCopy)
 {
 	if (!isFastCopy)
 	{
@@ -370,7 +329,6 @@ CMesh::CMesh(const bool isFastCopy, const CMesh& from)
 
 	//avoid overhead of copying data unecessarily
 	evecCache = from.evecCache;
-	wMatGap = from.wMatGap;
 	sh2jnt = from.sh2jnt;
 	modsmooth = from.modsmooth;
 	vJoint = from.vJoint;
@@ -599,8 +557,8 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 		}
 	//cout << "End Joints:" << endl;
 	//cout << mEndJoint << endl;
-	mAccumulatedMotion.reset(mJointNumber);
-	mCurrentMotion.reset(mJointNumber);
+	//mAccumulatedMotion.reset(mJointNumber);
+	//mCurrentMotion.reset(mJointNumber);
 
 	mCovered.setSize(mBounds.xSize());
 	mExtremity.setSize(mBounds.xSize());
@@ -668,9 +626,8 @@ void CMesh::prepareData()
 			vJoint[a] = mJoint[a];
 	}
 	{//prepare weightMatrix
-		wMatGap = (mNumPoints + 3) / 4;
-		if (wMatGap & 0x1)
-			wMatGap++;// at least for AVX--32byte boundary
+		uint32_t wMatGap = (mNumPoints + 7) / 8;// at least for AVX--32byte boundary, 8 float
+		wMatGap *= 2; //wMatGap means each joint's weight matrix has how many Vertex(1 Vertex for 4 points)
 		miniBLAS::VertexVec wgtMat(wMatGap*mJointNumber);
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
@@ -687,8 +644,10 @@ void CMesh::prepareData()
 			const Vertex *__restrict va = &wgtMat[item[0] * wMatGap], *__restrict vb = &wgtMat[item[1] * wMatGap];
 			__m256 sumvec = _mm256_setzero_ps();
 			const __m256 helper_zero = _mm256_setzero_ps();
+			//each time calculate 8 weights(for 8 points)
 			for (uint32_t a = 0; a < wMatGap; va += 2, vb += 2, a += 2)
 			{
+				//points' influence on joint-i0 and joint-i1 are compared and select the fewer one
 				const __m256 minM = _mm256_min_ps(_mm256_load_ps((float*)va), _mm256_load_ps((float*)vb))/*01234567*/;
 				if (_mm256_movemask_ps(_mm256_cmp_ps(minM, helper_zero, _CMP_NEQ_OQ)))//has non-zero param
 				{//pre-compute matrix for updJoints
@@ -720,8 +679,10 @@ void CMesh::prepareData()
 		modsmooth->ptSmooth.clear();
 		for (uint16_t a = 0; a < mNumPoints; ++a)
 		{
+			//mPoints holds xyz of point, then each 2 float represent joint-id(1 based) and weight
 			const float *ptr = mPoints[a].data();
 			vPoints[a].assign(ptr);
+			//w should be manually set to 1 while applying affine transformation on the 3d-points pos
 			vPoints[a].w = 1;
 			vector<ModelSmooth::SmoothParam> tmpsp;
 			for (uint32_t c = 0; c < mNumSmooth; c++)
@@ -736,6 +697,7 @@ void CMesh::prepareData()
 				if (tmpsp.size() > 4)// remove lowest weight smooth param
 				{
 					std::sort(tmpsp.begin(), tmpsp.end(), [](const auto& l, const auto& r) { return l.weight > r.weight; });
+					//cut smooth param means losing some weights, so need to scale all other weights
 					float allweight;
 					for (uint32_t curidx = 0; curidx < 4; curidx++)
 						allweight += tmpsp[curidx].weight;
@@ -749,63 +711,12 @@ void CMesh::prepareData()
 			}
 		}
 		uint32_t scidx = 0;
+		//gather 4 kinds of smooth-param to one vector---try to be more cache-friendly
 		for (auto& spg : spgroup)
 		{
 			modsmooth->smtCnt[scidx++] = spg.size();
 			modsmooth->ptSmooth.insert(modsmooth->ptSmooth.end(), spg.begin(), spg.end());
 		}
-	}
-	if(false)
-	{
-		FILE *fp = fopen("smtcheck.txt", "w+");
-		uint32_t catcnta[2] = { 0 };
-		for (uint32_t a = 1; a <= mJointNumber; ++a)
-		{
-			uint32_t catcntb[2] = { 0 };
-			fprintf(fp, "Joint %2d\n", a);
-			for (uint32_t b = 0; b < mNumPoints;)
-			{
-				bool flags[2] = { false };
-				const float *ptr1 = mPoints[b++].data();
-				for (uint32_t c = 0; c < mNumSmooth; c++)
-				{
-					const float weight = ptr1[4 + 2 * c];
-					const uint32_t jid = ptr1[3 + 2 * c];
-					if (weight > 10e-6 && jid == a)//take it
-						flags[0] = true;
-				}
-				if (b < mNumPoints)
-				{
-					const float *ptr2 = mPoints[b++].data();
-					for (uint32_t c = 0; c < mNumSmooth; c++)
-					{
-						const float weight = ptr2[4 + 2 * c];
-						const uint32_t jid = ptr2[3 + 2 * c];
-						if (weight > 10e-6 && jid == a)//take it
-							flags[1] = true;
-					}
-				}
-				fprintf(fp, "%c,%c\t", flags[0] ? 'Y' : 'N', flags[1] ? 'Y' : 'N');
-				if (flags[0] && flags[1])
-				{
-					fprintf(fp, "Y\n");
-					catcntb[1]++;
-				}
-				else if (flags[0] || flags[1])
-				{
-					fprintf(fp, "Y\n");
-					catcntb[0]++;
-				}
-				else
-					fprintf(fp, "N\n");
-			}
-			fprintf(fp, "%4d half / %4d both / %4d total\n\n", catcntb[0], catcntb[1], (mNumPoints + 1) / 2);
-			catcnta[0] += catcntb[0];
-			catcnta[1] += catcntb[1];
-		}
-		fprintf(fp, "total\n%5d half / %5d both / %5d need / %5d total\n\n", catcnta[0], catcnta[1], catcnta[0] + catcnta[1], (mNumPoints + 1) / 2 * mJointNumber);
-		fprintf(fp, "all %5d smooth.\n", allsmtcnt);
-		fclose(fp);
 	}
 }
 
@@ -1092,6 +1003,7 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 			}
 		}
 		mCenter = M(0)*mCenter;
+		/*
 		// Sum up motion
 		mAccumulatedMotion.mRBM = M(0)*mAccumulatedMotion.mRBM;
 		mCurrentMotion.mRBM = M(0)*mCurrentMotion.mRBM;
@@ -1102,6 +1014,7 @@ void CMesh::rigidMotion(CVector<CMatrix<float> >& M, CVector<float>& X, bool smo
 			X(i) = T1(i) - mAccumulatedMotion.mPoseParameters(i);
 		mAccumulatedMotion.mPoseParameters += X;
 		mCurrentMotion.mPoseParameters += X;
+		*/
 	}
 }
 void CMesh::rigidMotionSim_AVX(const MotionMat& M)
@@ -1376,7 +1289,7 @@ void CMesh::smoothMotionDQ(CVector<CMatrix<float> >& M, CVector<float>& X)
 	}
 }
 
-
+/*
 void CMesh::makeSmooth(CMesh* initMesh, bool dual)
 {
 	if (mNumSmooth > 1)
@@ -1425,8 +1338,8 @@ void CMesh::makeSmooth(CMesh* initMesh, bool dual)
 			rigidMotion(M, X, true);
 	}
 }
+*/
 
-// angleToMatrix
 void CMesh::angleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M)
 {
 	// Determine motion of parts behind joints
@@ -1562,43 +1475,12 @@ void CMesh::fastShapeChangesToMesh(const double *shapeParamsIn, const uint32_t n
 		}
 }
 
-/*
-void CMesh::NEWfastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
-{
-	CheckCut(false);
-	SimpleTimer timer;
-	//20 * row(EVALUATE_POINTS_NUM) * col(3)
-	const float *__restrict pEc = (float*)evecCache2->data();
-	for (uint32_t pn = 0; pn < SHAPEPARAM_NUM; pn++)
-	{
-		const __m256 param = _mm256_set1_ps(((float*)shapeParamsIn)[pn]);
-		float *__restrict pPt = vPoints[0];
-		for (uint32_t i = vPoints.size() / 8; i--; pPt += 32, pEc += 32)
-		{
-#ifdef __FMA__
-			_mm256_store_ps(pPt + 0, _mm256_fmadd_ps(_mm256_load_ps(pEc + 0), param, _mm256_load_ps(pPt + 0)));
-			_mm256_store_ps(pPt + 8, _mm256_fmadd_ps(_mm256_load_ps(pEc + 8), param, _mm256_load_ps(pPt + 8)));
-			_mm256_store_ps(pPt + 16, _mm256_fmadd_ps(_mm256_load_ps(pEc + 16), param, _mm256_load_ps(pPt + 16)));
-			_mm256_store_ps(pPt + 24, _mm256_fmadd_ps(_mm256_load_ps(pEc + 24), param, _mm256_load_ps(pPt + 24)));
-#else
-			const __m256 i12 = _mm256_mul_ps(_mm256_load_ps(pEc), param), i34 = _mm256_mul_ps(_mm256_load_ps(pEc + 8), param),
-				i56 = _mm256_mul_ps(_mm256_load_ps(pEc + 16), param), i78 = _mm256_mul_ps(_mm256_load_ps(pEc + 24), param);
-			_mm256_store_ps(pPt + 0, _mm256_add_ps(_mm256_load_ps(pPt + 0), i12));
-			_mm256_store_ps(pPt + 8, _mm256_add_ps(_mm256_load_ps(pPt + 8), i34));
-			_mm256_store_ps(pPt + 16, _mm256_add_ps(_mm256_load_ps(pPt + 16), i56));
-			_mm256_store_ps(pPt + 24, _mm256_add_ps(_mm256_load_ps(pPt + 24), i78));
-#endif
-		}
-	}
-	timer.Stop();
-	functime[2] += timer.ElapseNs(); funccount[2]++;
-}
-*/
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
+void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn)
 {
 	SimpleTimer timer;
 	//5 * row(EVALUATE_POINTS_NUM/2) * 3(xyz) * 4(4param)
 	const float *__restrict pEc = (float*)evecCache->data();
+	//each time calculate 4 shape-params' influence on mesh
 	for (uint32_t pn = 0; pn < SHAPEPARAM_NUM / 4; pn++)
 	{
 		const __m256 param = _mm256_set_m128(shapeParamsIn[pn], shapeParamsIn[pn]);
@@ -1606,10 +1488,13 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 		//!!!!The last point is left unchanged!!!!
 		for (uint32_t i = EVALUATE_POINTS_NUM / 4; i--; pPt += 16, pEc += 48)
 		{
+			//loop unrolling: each time load and calculate 4 points
 			const __m256 pt12 = _mm256_load_ps(pPt), pt34 = _mm256_load_ps(pPt + 8);
+			//calculate sum of incluences(based on 4 params) on point(1&2 OR 3&4)'s (x/y/z)
 			const __m256 inf12x = _mm256_dp_ps(_mm256_load_ps(pEc), param, 0xf1), inf34x = _mm256_dp_ps(_mm256_load_ps(pEc + 8), param, 0xf1),
 				inf12y = _mm256_dp_ps(_mm256_load_ps(pEc + 16), param, 0xf2), inf34y = _mm256_dp_ps(_mm256_load_ps(pEc + 24), param, 0xf2),
 				inf12z = _mm256_dp_ps(_mm256_load_ps(pEc + 32), param, 0xf4), inf34z = _mm256_dp_ps(_mm256_load_ps(pEc + 40), param, 0xf4);
+			//blend to get final influence on points s 1/2/3/4
 			const __m256 infl12 = _mm256_blend_ps(inf12z, _mm256_blend_ps(inf12x, inf12y, 0x22), 0x33),
 				infl34 = _mm256_blend_ps(inf34z, _mm256_blend_ps(inf34x, inf34y, 0x22), 0x33);
 			_mm256_store_ps(pPt, _mm256_add_ps(pt12, infl12));
@@ -1619,10 +1504,10 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
 	timer.Stop();
 	functime[2] += timer.ElapseNs(); funccount[2]++;
 }
-void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
+void CMesh::fastShapeChangesToMesh(const miniBLAS::Vertex *shapeParamsIn, const int8_t *__restrict validMask)
 {
 	SimpleTimer timer;
-	fastShapeChangesToMesh_AVX(shapeParamsIn);
+	fastShapeChangesToMesh(shapeParamsIn);
 	validPts.clear(); validPts.reserve(EVALUATE_POINTS_NUM / 2);
 	for (uint32_t i = 0; i < EVALUATE_POINTS_NUM; ++i)
 		if (validMask[i])
@@ -1630,55 +1515,6 @@ void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn, co
 	timer.Stop();
 	functime[3] += timer.ElapseNs(); funccount[3]++;
 }
-//void CMesh::fastShapeChangesToMesh_AVX(const miniBLAS::Vertex *shapeParamsIn)
-//{
-//	CheckCut(false);
-//	SimpleTimer timer;
-//	//row * col(3) * z(20 = 5Vertex)
-//	//calculate vertex-dpps-vertex =====> 20 mul -> sum, sum added to mPoints[r,c]
-//	const __m256 sp12 = _mm256_load_ps(shapeParamsIn[0]), sp34 = _mm256_load_ps(shapeParamsIn[2]), sp45 = _mm256_loadu_ps(shapeParamsIn[3]);
-//	const __m256 sp23 = _mm256_loadu_ps(shapeParamsIn[1]), sp51 = _mm256_set_m128(shapeParamsIn[0], shapeParamsIn[4]);
-//	const __m128 sp1 = shapeParamsIn[0], sp2 = shapeParamsIn[1], sp3 = shapeParamsIn[2], sp4 = shapeParamsIn[3], sp5 = shapeParamsIn[4];
-//	const Vertex *__restrict pEvec = &(*evecCache)[0];
-//	for (uint32_t row = 0; row < mNumPoints; row++, pEvec += 16)
-//	{
-//		_mm_prefetch((const char*)(pEvec + 16), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 20), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 24), _MM_HINT_NTA);
-//		_mm_prefetch((const char*)(pEvec + 28), _MM_HINT_NTA);
-//		const __m256 addA = _mm256_add_ps
-//		(
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[0]), 0b11110001)/*sx1,0,0,0;sx2,0,0,0*/,
-//				_mm256_dp_ps(sp23, _mm256_load_ps(pEvec[6]), 0b11110010)/*0,sy2,0,0;0,sy3,0,0*/,
-//				0b00100010),
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[2]), 0b11110001)/*sx3,0,0,0;sx4,0,0,0*/,
-//				_mm256_dp_ps(sp12, _mm256_load_ps(pEvec[10]), 0b11110100)/*0,0,sz1,0;0,0,sz2,0*/,
-//				0b01000100)
-//		)/*sx13,sy2,sz1,0;sx24,sy3,sz2,0*/;
-//		const __m256 addB = _mm256_add_ps
-//		(
-//			_mm256_add_ps(
-//				_mm256_blend_ps(
-//					_mm256_dp_ps(sp51, _mm256_load_ps(pEvec[4]), 0b11110011)/*sx5,sx5,0,0;sy1,sy1,0,0*/,
-//					_mm256_setzero_ps(), 0b00011110)/*sx5,0,0,0;0,sy1,0,0*/,
-//				_mm256_insertf128_ps(
-//					_mm256_dp_ps(sp51, _mm256_broadcast_ps((__m128*)&pEvec[14]), 0b11110100)/*0,0,sz5,0;0,0,?,0*/,
-//					vPoints[row], 1)/*0,0,sz5,0;x,y,z,1*/
-//			)/*sx5,0,sz5,0;sx0,sy01,sz0,1*/,
-//			_mm256_blend_ps(
-//				_mm256_dp_ps(sp34, _mm256_load_ps(pEvec[12]), 0b11110100)/*0,0,sz3,0;0,0,sz4,0*/,
-//				_mm256_dp_ps(sp45, _mm256_load_ps(pEvec[8]), 0b11110010)/*0,sy4,0,0;0,sy5,0,0*/,
-//				0b00100010)
-//		)/*sx5,sy4,sz35,0;sx0,sy015,sz04,1*/;
-//		const __m256 addAB = _mm256_add_ps(addA, addB)/*sx135,sy24,sz135,0;sx024,sy0135,sz024,1*/;
-//		const __m128 newval = _mm256_castps256_ps128(_mm256_add_ps(_mm256_permute2f128_ps(addAB, addAB, 0b01), addAB));
-//		vPoints[row].assign(newval);
-//	}
-//	timer.Stop();
-//	functime[2] += timer.ElapseNs(); funccount[2]++;
-//}
 
 int CMesh::updateJntPos()
 {
@@ -1704,7 +1540,7 @@ int CMesh::updateJntPos()
 			tmpMatrix.sumToY3(sum);
 			sum /= sumMinEle;
 			joints0.putToY3(sum, i0, i1x3);
-			//below are pieces of shit.
+			//below are useless
 			/*
 			CVector<float> t1; t1.setSize(tmpMatrix.ySize());
 			sumTheMatrix(tmpMatrix, t1);
@@ -1732,7 +1568,7 @@ int CMesh::updateJntPos()
 	*/
 	miniBLAS::Vertex sum(true);
 	newJntPos.putToY3(sum, 0, 0);
-	//shit code again
+	//useless code again
 	/*
 	CVector<float> t1; t1.setSize(tmpMatrix.ySize());
 	sumTheMatrix(tmpMatrix, t1);
@@ -2099,214 +1935,4 @@ void CMesh::getWeightsinBuffer(char *buffer, int ptNo)
 		wtStr += buffer;
 	}
 	strcpy(buffer, wtStr.c_str());
-}
-
-void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue)
-{
-	int I[4];
-	CVector<float> aPoint(3);
-	int ax, ay, bx, by, cx, cy;
-	int Size = (*this).GetMeshSize();
-	int j;
-	int det;
-	float X, Y, Z;
-	//cout << Size << endl;
-	for (int i = 0; i < Size; i++)
-	{
-		(*this).GetPatch(i, I[0], I[1], I[2]);
-		j = 0;
-		// Test if patch is visible ...
-		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
-		(*this).projectPoint(P, X, Y, Z, ax, ay);
-		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
-		(*this).projectPoint(P, X, Y, Z, bx, by);
-		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
-		(*this).projectPoint(P, X, Y, Z, cx, cy);
-
-		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
-
-		if (det < 0.001)
-		{
-			for (j = 0; j < 3; j++)
-			{
-				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-
-				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-					aImage.drawLine(ax, ay, bx, by, aLineValue);
-				ax = bx;
-				ay = by;
-			}
-			j = 0;
-			(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-			if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-				aImage.drawLine(ax, ay, bx, by, aLineValue);
-		}
-	}
-}
-
-void CMesh::projectToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aLineVal, int aNodeVal)
-{
-	projectToImage(aImage, P, aLineVal);
-	projectPointsToImage(aImage, P, aNodeVal);
-}
-
-void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB)
-{
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, 255);
-	int aSize = aMesh.size();
-	int a2Size = 2 * aSize;
-	for (int i = 0; i < aSize; i++)
-		if (aMesh.data()[i] == 255)
-		{
-			aImage.data()[i] = aLineR;
-			aImage.data()[i + aSize] = aLineG;
-			aImage.data()[i + a2Size] = aLineB;
-		}
-}
-
-void CMesh::projectToImage(CTensor<float>& aImage, CMatrix<float>& P, int aLineR, int aLineG, int aLineB, int aNodeR, int aNodeG, int aNodeB)
-{
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, 255, 128);
-	int aSize = aMesh.size();
-	int a2Size = 2 * aSize;
-	for (int i = 0; i < aSize; i++)
-		if (aMesh.data()[i] == 255)
-		{
-			aImage.data()[i] = aLineR;
-			aImage.data()[i + aSize] = aLineG;
-			aImage.data()[i + a2Size] = aLineB;
-		}
-		else if (aMesh.data()[i] == 128)
-		{
-			aImage.data()[i] = aNodeR;
-			aImage.data()[i + aSize] = aNodeG;
-			aImage.data()[i + a2Size] = aNodeB;
-		}
-}
-
-// projectPointsToImage
-void CMesh::projectPointsToImage(CMatrix<float>& aImage, CMatrix<float>& P, int aNodeVal)
-{
-	int ax, ay;
-	CMatrix<float> aMesh(aImage.xSize(), aImage.ySize(), 0);
-	projectToImage(aMesh, P, aNodeVal);
-
-	int Size = (*this).GetPointSize();
-	for (int i = 0; i < Size; i++)
-	{
-		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
-		if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-			if (aMesh(ax, ay) == aNodeVal)
-				aImage(ax, ay) = aNodeVal;
-	}
-}
-
-void CMesh::projectPointsToImage(CTensor<float>& a3DCoords, CMatrix<float>& P)
-{
-	int ax, ay;
-	int aNodeVal = 39;
-
-	CMatrix<float> aMesh(a3DCoords.xSize(), a3DCoords.ySize(), 0);
-	projectToImage(aMesh, P, aNodeVal);
-
-	int Size = GetPointSize();
-	for (int i = 0; i < Size; i++)
-	{
-		projectPoint(P, mPoints[i](0), mPoints[i](1), mPoints[i](2), ax, ay);
-		if (ax >= 0 && ay >= 0 && ax < a3DCoords.xSize() && ay < a3DCoords.ySize())
-			if (aMesh(ax, ay) == aNodeVal)
-			{
-				a3DCoords(ax, ay, 0) = mPoints[i](0);
-				a3DCoords(ax, ay, 1) = mPoints[i](1);
-				a3DCoords(ax, ay, 2) = mPoints[i](2);
-				a3DCoords(ax, ay, 3) = mPoints[i](3);
-			}
-	}
-
-}
-
-void CMesh::projectToImageJ(CMatrix<float>& aImage, CMatrix<float>& P, int aLineValue, int aJoint, int xoffset, int yoffset)
-{
-
-	int I[4];
-	CVector<float> aPoint(3);
-	int ax, ay, bx, by, cx, cy;
-	int Size = (*this).GetMeshSize();
-	int j;
-	int det;
-	float X, Y, Z;
-
-	for (int i = 0; i < Size; i++)
-	{
-		(*this).GetPatch(i, I[0], I[1], I[2]);
-		j = 0;
-		// Test if patch is visible ...
-		X = mPoints[I[0]](0); Y = mPoints[I[0]](1); Z = mPoints[I[0]](2);
-		(*this).projectPoint(P, X, Y, Z, ax, ay);
-		ax -= xoffset; ay -= yoffset;
-		X = mPoints[I[1]](0); Y = mPoints[I[1]](1); Z = mPoints[I[1]](2);
-		(*this).projectPoint(P, X, Y, Z, bx, by);
-		bx -= xoffset; by -= yoffset;
-		X = mPoints[I[2]](0); Y = mPoints[I[2]](1); Z = mPoints[I[2]](2);
-		(*this).projectPoint(P, X, Y, Z, cx, cy);
-		cx -= xoffset; cy -= yoffset;
-
-		det = ax*(by - cy) - bx*(ay - cy) + cx*(ay - by);
-
-		{
-			if (((*this).GetJointID(I[0]) == aJoint) || ((*this).GetJointID(I[1]) == aJoint) || ((*this).GetJointID(I[2]) == aJoint))
-			{
-				for (j = 0; j < 3; j++)
-				{
-					(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-					bx -= xoffset; by -= yoffset;
-
-					if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-						aImage.drawLine(ax, ay, bx, by, aLineValue);
-					ax = bx;
-					ay = by;
-				}
-				j = 0;
-				(*this).projectPoint(P, mPoints[I[j]](0), mPoints[I[j]](1), mPoints[I[j]](2), bx, by);
-				bx -= xoffset; by -= yoffset;
-				if (ax >= 0 && ay >= 0 && ax < aImage.xSize() && ay < aImage.ySize())
-					aImage.drawLine(ax, ay, bx, by, aLineValue);
-			}
-		}
-	}
-}
-
-// projectSurface
-void CMesh::projectSurface(CMatrix<float>& aImage, CMatrix<float>& P, int xoffset, int yoffset)
-{
-	//aImage = 0;
-
-	CMatrix<float> ImageP = aImage;
-
-	for (int k = 0; k <= mJointNumber; k++)
-	{
-		ImageP = 0;
-		projectToImageJ(ImageP, P, 1, k, xoffset, yoffset);
-
-		for (int i = 0; i < ImageP.xSize(); i++)
-			ImageP(i, 0) = 0;
-		for (int i = 0; i < ImageP.ySize(); i++)
-			ImageP(0, i) = 0;
-		int aSize = ImageP.size();
-		for (int i = 0; i < aSize; i++)
-			if (ImageP.data()[i] == 0)
-			{
-				int y = i / ImageP.xSize();
-				int x = i - ImageP.xSize()*y;
-				ImageP.connectedComponent(x, y);
-				break;
-			}
-		// Fill in ...
-		for (int i = 0; i < aSize; i++)
-		{
-			if (ImageP.data()[i] == 0) aImage.data()[i] = 255;
-		}
-	}
 }

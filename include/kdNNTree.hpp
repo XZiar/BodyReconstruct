@@ -1,5 +1,7 @@
 #pragma once
-
+/*
+ * Use CRTP to save some code, for better maintainance
+**/
 #include <cstdint>
 
 #include "miniBLAS.hpp"
@@ -9,12 +11,18 @@ namespace miniBLAS
 
 struct NNResult;
 
+//A.search(B) means, for each points in B, find its nearest point in A
 template<typename CHILD>
 class NNTreeBase
 {
 protected:
 	VertexVec tree[8];
 	VertexVec ntree[8];
+	/*points may be devided into different parts, so its original index must be stored.
+	 *indexes are stored seperated to avoid abundant calculation.
+	 *Though it's vector<Vertex> (float), the data are uint32_t.
+	 *They will not be in calculation, so use float AVX to avoid lentancy in switch float/integer AVX pipeline
+	 **/
 	VertexVec idtree[8];
 	uint32_t ptCount;
 	static const uint32_t minbase = 8;
@@ -26,94 +34,41 @@ public:
 	float MAXDist2 = 3e4f;
 	NNTreeBase() = default;
 	~NNTreeBase() = default;
+	/*points should contain its index in w, though they may be the same as its index in vector*/
 	void init(const VertexVec& points, const VertexVec& normals, const uint32_t nPoints);
 	void searchBasic(const Vertex *__restrict pVert, const uint32_t count, int *idxs, float *dists) const;
 	void search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const;
 	void searchOnAngle(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angle) const;
+	//Search will consider angle.angMax means max-angle allowed. However, angle bigger than angleLim will receive pentalty on distance
+	//For A.search(B), since the normal of scanbody is not reliable(sometimes 0,0,0),
+	//some accurate match will be abandoned for its not satisfying angle limit.
+	//Also, body surface tends to be smooth so their normals could be similar.
+	//Hence, there is a situation that multi points in B matches the same point in A.
+	//According to d2threashold, function store the limit distance for each point in A(min dist*d2threshold),
+	//and we can use the value(stored in NNResult) to filter unwant match pairs
 	void searchOnAnglePan(NNResult& res, const VertexVec& pt, const VertexVec& norm, const float angMax, const float angleLim, const float d2threshold = 1.25f/*1.12^2*/) const;
 	uint32_t PTCount() const { return ptCount + 7; };
 };
 
-
+/*container for the result of nnsearch*/
 struct NNResult
 {
 private:
 	template<typename T>
 	friend class NNTreeBase;
 	uint32_t baseSize, objSize;
-	void alloc(bool isPrep)
-	{
-		idxs = new int32_t[objSize];
-		dists = new float[objSize];
-		mdists = new float[baseSize];
-		mthcnts = new uint8_t[baseSize];
-		if (isPrep)
-		{
-			memset(idxs, 0x0, sizeof(int32_t) * objSize);
-			memset(mdists, 0x7f, sizeof(float) * baseSize);
-			memset(mthcnts, 0x0, sizeof(uint8_t) * baseSize);
-		}
-	}
-	void clean()
-	{
-		if (idxs != nullptr)
-			delete[] idxs;
-		if (dists != nullptr)
-			delete[] dists;
-		if (mdists != nullptr)
-			delete[] mdists;
-		if (mthcnts != nullptr)
-			delete[] mthcnts;
-	};
 public:
-	int32_t *idxs = nullptr;
-	float *dists = nullptr;
-	float *mdists = nullptr;
-	uint8_t *mthcnts = nullptr;
+	std::vector<int32_t> idxs;
+	std::vector<float> dists;
+	std::vector<float> mdists;
+	std::vector<uint8_t> mthcnts;
 	NNResult(const uint32_t oSize, const uint32_t bSize) : objSize(oSize), baseSize(bSize)
 	{
-		clean();
-		alloc(true);
+		idxs.resize(objSize, 0);
+		dists.resize(objSize);
+		mdists.resize(baseSize, 1e10f);
+		mthcnts.resize(baseSize, 0);
 	};
-	NNResult(const NNResult& o)
-	{
-		*this = o;
-	}
-	NNResult(NNResult&& o) : baseSize(o.baseSize), objSize(o.objSize), idxs(o.idxs), dists(o.dists), mdists(o.mdists), mthcnts(o.mthcnts)
-	{
-		o.idxs = nullptr;
-		o.dists = nullptr;
-		o.mdists = nullptr;
-		o.mthcnts = nullptr;
-	}
-	~NNResult()
-	{
-		clean();
-	}
-
-	NNResult & operator = (const NNResult& o)
-	{
-		assert(this != &o);
-		clean();
-		baseSize = o.baseSize; objSize = o.objSize;
-		alloc(false);
-		memcpy(idxs, o.idxs, sizeof(int32_t) * objSize);
-		memcpy(dists, o.dists, sizeof(float) * objSize);
-		memcpy(mdists, o.mdists, sizeof(float) * baseSize);
-		memcpy(mthcnts, o.mthcnts, sizeof(uint8_t) * baseSize);
-		return *this;
-	}
-	NNResult & operator = (NNResult&& o)
-	{
-		assert(this != &o);
-		clean();
-		baseSize = o.baseSize; objSize = o.objSize;
-		idxs = o.idxs; o.idxs = nullptr;
-		dists = o.dists; o.dists = nullptr;
-		mdists = o.mdists; o.mdists = nullptr;
-		mthcnts = o.mthcnts; o.mthcnts = nullptr;
-		return *this;
-	}
 };
 
 
@@ -157,7 +112,8 @@ void NNTreeBase<CHILD>::init(const VertexVec& points, const VertexVec& normals, 
 				vb45 = _mm256_load_ps(pts[c + 4]), vb67 = _mm256_load_ps(pts[c + 6]);
 			//make up vector contain 8 new idx from point-base's extra idx data
 			const __m256 id8 = _mm256_shuffle_ps(_mm256_unpackhi_ps(vb01, vb23)/*xx,i1,i3;xx,i2,i4*/,
-				_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110)/*i1,i3,i5,i7;i2,i4,i6,i8*/;
+				_mm256_unpackhi_ps(vb45, vb67)/*xx,i5,i7;xx,i6,i8*/, 0b11101110);
+			/*i1,i3,i5,i7;i2,i4,i6,i8*/
 			_mm256_store_ps(ids[b], id8);
 		}
 	}
@@ -282,7 +238,7 @@ template<typename CHILD>
 void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const VertexVec& norm, const float angle) const
 {
 	const uint32_t count = ret.objSize;
-	int *idxs = ret.idxs; float *dists = ret.dists;
+	int *idxs = ret.idxs.data(); float *dists = ret.dists.data();
 	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angle / 180));
 	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
 	for (uint32_t a = count; a--; ++pVert, ++pNorm)
@@ -393,7 +349,8 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 	const float d2threshold) const
 {
 	const uint32_t count = ret.objSize;
-	int *idxs = ret.idxs; float *dists = ret.dists;
+	int *idxs = ret.idxs.data(); float *dists = ret.dists.data();
+	//angle's cos decrease when angle's increasing
 	const __m256 mincos = _mm256_set1_ps(cos(3.1415926 * angMax / 180)), limcos = _mm256_set1_ps(cos(3.1415926 * angLim / 180));
 	const __m256 panMin = _mm256_set1_ps(1);
 	const Vertex *pVert = &pt[0], *pNorm = &norm[0];
@@ -414,8 +371,10 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 		//min dist * 8   AND   min idx * 8
 		__m256 min8 = _mm256_set1_ps(1e10f), minpos8 = _mm256_setzero_ps();
 
+		//use AVX which contains 8 float, hence 8 vertex was tested at one cycle
 		for (uint32_t b = part.size() / 8; b--; pID += 8)
 		{
+			//calc angles(cos) between obj point and 8 base point
 			const __m256 cos8 = _mm256_blend_ps
 			(
 				_mm256_blend_ps(
@@ -442,8 +401,9 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 			if (!_mm256_movemask_ps(cosRes))//angle all unsatisfied
 				continue;
 
-			//const __m256 panMask = _mm256_and_ps(_mm256_cmp_ps(cos8, limcos, _CMP_LT_OS), cosRes);//those need to be panish
-			const __m256 pan8 = _mm256_max_ps(_mm256_div_ps(limcos, cos8), panMin);
+			//for those angles smaller than lim-angle, the penalty will be less than 1(which means decrease of distance)
+			//hence use max to make sure that all penalties are at least zero
+			const __m256 pan8 = _mm256_max_ps(_mm256_div_ps(limcos, cos8), panMin);//those need to be panish
 
 			//make up vector contain 8 dist data(dist^2)
 			const __m256 the8 = _mm256_blend_ps
@@ -535,10 +495,18 @@ protected:
 	}
 };
 
+/* h3NNTree is an enhanced tree which reduce unnecessary search by deviding the model to 3 parts.
+ * assuming 0 is the average of the model's max height and min height, the model is devided into upper and lowwer parts
+ * since there's may be some points linking to the other part, the points near 0 is collected as the middle part.
+ * Let D be the difference of model's height, points whose height satisfied(abs(z)<=0.2D) is the middle,
+ * z>0 is the upper and z<0 is the lowwer.
+ * While searching, object points whose abs(z)<=0.1D are searched in middle part, z>0.1D:upper part, z<-0.1D:lowwer part
+ **/
 class h3NNTree : public NNTreeBase<h3NNTree>
 {
 protected:
 	friend NNTreeBase;
+	//0.1D and -0.1D
 	float hup, hlow;
 	inline int judgeIdx(const Vertex& v) const
 	{
@@ -560,6 +528,7 @@ public:
 		tree[1].reserve(nPoints * 2 / 3); ntree[1].reserve(nPoints * 2 / 3);
 		tree[2].reserve(nPoints * 2 / 3); ntree[2].reserve(nPoints * 2 / 3);
 		float limup, limlow;
+		//calculate the difference of height first
 		{
 			__m128 minV = _mm_set_ps1(1e10f), maxV = _mm_set_ps1(-1e10f);
 			for (uint32_t i = 0; i < nPoints; ++i)

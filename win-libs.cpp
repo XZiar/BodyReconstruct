@@ -1,3 +1,11 @@
+/*
+ * This cpp add dependency of other libraries. 
+ * It's only used in VS project.
+ * However, boost libraries are controlled by project settings(VC directory)
+ * blas and lapack is optional for ceres solver.
+ * I choose an unofficial dynamic library just because it does not depend on gfortran and gcc library
+ **/
+
 #ifdef _DEBUG
 
 #pragma comment(lib, R"(zlibd.lib)")

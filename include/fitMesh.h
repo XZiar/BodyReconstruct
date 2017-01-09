@@ -13,6 +13,7 @@ using arColIS = std::vector<int8_t>;
 void printMat(const char *str, const arma::mat& m);
 void printMatAll(const char *str, const arma::mat& m);
 
+/*used for store information of triangles for ray-tracing*/
 ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
 {
 	miniBLAS::Vertex p0, axisu, axisv, norm;
@@ -21,6 +22,7 @@ ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
 	bool intersect(const miniBLAS::Vertex& origin, const miniBLAS::Vertex& direction, const miniBLAS::VertexI& idx, const float dist) const;
 };
 
+/*Models all contain points,normals,colors*/
 struct ModelBase
 {
 	miniBLAS::VertexVec vPts;
@@ -63,11 +65,14 @@ struct CTemplate : public ModelBase
 	void updPoints();
 	void updPoints(miniBLAS::VertexVec&& pts);
 	void calcFaces();
+	/*calculate normals simply(use face normal)*/
 	void calcNormals();
+	/*calculate normals softly(use blend of face normals)*/
 	void calcNormalsEx();
 	std::vector<pcl::Vertices> ShowMesh(pcl::PointCloud<pcl::PointXYZRGB>& cloud);
 };
 
+/*Templete Model's params, controlling body shape and pose*/
 struct ModelParam
 {
 	using PoseParam = std::array<double, POSPARAM_NUM>;
@@ -85,6 +90,7 @@ struct ModelParam
 	auto Ppose() { return pose.data(); };
 };
 
+/*simple utility to create log*/
 class SimpleLog
 {
 private:
@@ -95,13 +101,16 @@ private:
 public:
 	SimpleLog();
 	~SimpleLog();
+	/*log string*/
 	SimpleLog& log(const std::string& str, const bool isPrint = false);
+	/*log formatted string, similar synax with printf*/
 	template<typename... Args>
 	SimpleLog& log(const bool isPrint, const char *s, Args... args)
 	{
 		sprintf(tmp, s, args...);
 		return log(tmp, isPrint);
 	}
+	/*the log file will not be created before the first calling flush*/
 	void flush();
 };
 
@@ -134,11 +143,13 @@ public:
 	fitMesh(const std::string& dir);
 	~fitMesh();
 	
+	/*basename to identify scan, filename is the real file name(with subdir), isOnce means it's only a scan or a scan sequence*/
 	void init(const std::string& baseName, const std::string& fileName, const bool isOnce);
 	//The main process of the fitting procedue
 	void mainProcess();
 	//The function of watch the result
 	void watch();
+	//log pre-saved model-params to watch
 	void watch(const uint32_t frameCount);
 private:
 	double npp[POSPARAM_NUM][6];
@@ -154,6 +165,7 @@ private:
 	enum ShowMode : uint8_t { None, PointCloud, ColorCloud, Mesh };
 	ShowMode showTMode = ColorCloud;
 	miniBLAS::Vertex camPos;
+	//store the align params of the first frame
 	arma::mat rotateMat;
 	arma::rowvec totalShift, baseShift;
 	double totalScale;
@@ -186,9 +198,7 @@ private:
 	void fitShapePoseRe(const CScan& scan, const std::vector<FitParam>& fitparams);
 	/** @brief fitFinal
 	 ** Fit the model to the whole scan series by pose & shape
-	 ** @param -paramer  a function to determine solve params by iteration
-	 **					function<tuple<double, bool, bool>(const uint32_t, const uint32_t, const double)>
-	 **					cur_iter, all_iter, angle_limit ==> angle_limit, solveshape OR solvepose, pred(only in solvepose)
+	 ** @param -fitparams  a vector contains params needed for fit process
 	 **/
 	void fitFinal(const std::vector<FitParam>& fitparams);
 	void solvePose(const ceres::Solver::Options& options, const miniBLAS::VertexVec& scanCache, const arColIS& isValidNN, const double lastErr, const uint32_t curiter);
@@ -217,7 +227,9 @@ private:
 	 **/
 	void showResult(const CScan& scan, const bool showScan = true, const std::vector<uint32_t>* const idxs = nullptr) const;
 	
+	/*save current model-param sequences to file*/
 	bool saveMParam(const std::string& fname);
+	/*read model-param sequences from file, and load scans if needed*/
 	bool readMParamScan(const std::string& fname);
 	void showFrame(const uint32_t frame);
 

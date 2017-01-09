@@ -1321,7 +1321,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		cMatchNN++; tMatchNN += timer.ElapseMs();
 		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
 		idxs.resize(tempbody.nPoints);
-		memcpy(idxs.data(), nnres.idxs, sizeof(int32_t) * tempbody.nPoints);
+		memcpy(idxs.data(), nnres.idxs.data(), sizeof(int32_t) * tempbody.nPoints);
 		weights = nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
 

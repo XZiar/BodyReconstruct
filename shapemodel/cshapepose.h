@@ -15,7 +15,9 @@ private:
 
 public:
 	CShapePose(const std::string& modelFileName);
+	/*pre-compute mesh data based on validmask*/
 	PtrModSmooth preCompute(const int8_t *__restrict validMask) const { return initMesh_bk.preCompute(validMask); };
+	/*For pose-solving, shape param remains unchanged, hence fitShapeChangesToMesh and */
 	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn) const;
 	CMesh getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const;
 	miniBLAS::VertexVec getModelByPose(const miniBLAS::VertexVec& basePoints, const double *__restrict poseParamsIn) const;
