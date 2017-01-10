@@ -284,34 +284,12 @@ void CMesh::operator=(const CMesh& aMesh)
 	mJoint = aMesh.mJoint;
 	mInfluencedBy = aMesh.mInfluencedBy;
 
-	//mAccumulatedMotion = aMesh.mAccumulatedMotion;
-	//mCurrentMotion = aMesh.mCurrentMotion;
-
 	weightMatrix = aMesh.weightMatrix;
 	modsmooth = std::make_shared<ModelSmooth>(*aMesh.modsmooth);
 
 	evecCache = aMesh.evecCache;
 	sh2jnt = aMesh.sh2jnt;
 	vPoints = aMesh.vPoints;
-}
-
-CMesh::CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn)
-{
-	isCopy = true;
-	mNumPoints = from.mNumPoints;
-
-	mJointMap = from.mJointMap;
-	mInfluencedBy = from.mInfluencedBy;
-
-	//avoid overhead of copying data unecessarily
-	evecCache = from.evecCache;
-	sh2jnt = from.sh2jnt;
-	modsmooth = from.modsmooth;
-	vJoint = from.vJoint;
-	if (pointsIn == nullptr)
-		vPoints = from.vPoints;
-	else
-		vPoints = *pointsIn;
 }
 
 CMesh::CMesh(const CMesh& from, const bool isFastCopy)
@@ -1655,6 +1633,10 @@ void CMesh::updateJntPosEx()
 	uint32_t mIdx = 0;
 	for (const uint8_t(&item)[3] : idxmap)
 	{
+		/*For given two joints, choose the low value in their weight matrix(shape's change on joint's pose)
+		 *and then multiple with points to calculate the average influence on joint.
+		 *s2j stores pre-compute weight data(already div by the total number, so just multiple and sum up)
+		 **/
 		const auto& s2j = sh2jnt->at(mIdx++);
 		__m256 sumPos = _mm256_setzero_ps();
 		const uint32_t matsize = s2j.idxs.size();
@@ -1787,19 +1769,6 @@ void CMesh::copyJointPos(int to, int from, CMatrix<float> &newJntPos)
 	newJntPos(to, 0) = newJntPos(from, 0);
 	newJntPos(to, 1) = newJntPos(from, 1);
 	newJntPos(to, 2) = newJntPos(from, 2);
-}
-
-void CMesh::printPoints(std::string fname)
-{
-	NShow::mLogFile.open((NShow::mResultDir + fname).c_str(), std::ios_base::app);
-	for (unsigned int i0 = 0; i0 < mPoints.size(); i0++)
-	{
-		NShow::mLogFile << mPoints[i0](0) << " " <<
-			mPoints[i0](1) << " " <<
-			mPoints[i0](2) << "\n";
-	}
-
-	NShow::mLogFile.close();
 }
 
 void CMesh::findNewAxesOrient(CVector<double> &axisLeftArm, CVector<double> &axisRightArm, CMatrix<float> newJntPos)

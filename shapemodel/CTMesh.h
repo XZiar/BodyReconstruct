@@ -165,8 +165,7 @@ public:
 		modsmooth.reset(new ModelSmooth());
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());
 	}
-	CMesh(const CMesh& from, const bool isFastCopy = false);
-	CMesh(const CMesh& from, const miniBLAS::VertexVec *pointsIn);
+	CMesh(const CMesh& from, const bool isFastCopy);// = false);
 	~CMesh() = default;
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
@@ -220,10 +219,6 @@ public:
 	void invAngleToMatrix(const CMatrix<float>& aRBM, CVector<float>& aJAngles, CVector<CMatrix<float> >& M);
 	void twistToMatrix(CVector<float>& aTwist, CVector<CMatrix<float> >& M);
 
-	// Fast projection of a 3-D point to the image plane
-	template<typename T>
-	void projectPoint(const CMatrix<float>& P, const float X, const float Y, const float Z, T& x, T& y);
-
 	// Copies aMesh
 	void operator=(const CMesh& aMesh);
 
@@ -241,8 +236,6 @@ public:
 
 	template<typename T>
 	void GetPoint(const int i, T& x, T& y, T& z);
-	template<typename T, typename T2>
-	void GetPoint(const int i, T& x, T& y, T& z, T2& w);
 	inline void GetPatch(int i, int& x, int& y, int& z);
 	inline void GetBounds(int J, int i, float& x, float& y, float& z);
 	int GetBoundJID(int J) { return (int)mBounds(J, 8, 0); };
@@ -257,21 +250,6 @@ public:
 
 	bool IsCovered(int i) { return mCovered[i]; };
 	bool IsExtremity(int i) { return mExtremity[i]; };
-
-	// Initialization of appearance model
-	//void initializeAppearanceModel(int aFeatureSize, int aViewCount);
-	// Update of appearance model and occlusion detection
-	//void updateAppearance(CTensor<float>& aData, CMatrix<float>& aOccluded, CMatrix<float>& P, int aViewNo, int aFrameNo, bool aOcclusionCheckOnly); 
-
-	// Writes accumulated motion to standard output
-	//inline void printAccumulatedMotion() {mAccumulatedMotion.print();};
-	// Writes accumulated motion to file
-	//inline void writeAccumulatedMotion() {mAccumulatedMotion.writeToFile();};
-	// Resets accumulated motion to 0
-	//inline void resetAccumulation() { mAccumulatedMotion.reset(mJointNumber); };
-	//inline void resetCurrentMotion() { mCurrentMotion.reset(mJointNumber); };
-	// Gives access to current motion
-	//inline CMeshMotion& currentMotion() { return mCurrentMotion; };
 
 	miniBLAS::VertexVec vPoints;
 	miniBLAS::VertexVec validPts;
@@ -326,21 +304,11 @@ protected:
 	CVector<bool> mBoundJoints;
 
 	CMatrix<bool> mInfluencedBy;
-	// CMatrix<float> mRBM; // Overall Rigid Body Motion;
 
-	//CMatrix<CAppearanceModel>* mAppearanceField;
-	// CTensor<bool>* mOccluded;
-	//CMeshMotion mAccumulatedMotion;
-	//CMeshMotion mCurrentMotion;
-	//CVector<CMeshMotion> mHistory;
 	CVector<CJoint>  mJoint;
 	std::array<CJointEx, MotionMatCnt> vJoint;
 
-	//static std::vector<CMatrix<double> >  eigenVectors;
 	CMatrix<float> weightMatrix;
-
-	// Sure Fields before the Draping ...
-	// CVector<float>* mPointsS;
 
 	// true if aParentJoint is an ancestor of aJoint
 	bool isParentOf(int aParentJointID, int aJointID);
@@ -358,31 +326,12 @@ protected:
 };
 
 template<typename T>
-void CMesh::projectPoint(const CMatrix<float>& P, const float X, const float Y, const float Z, T& x, T& y)
-{
-	const float hx = P.data()[0] * X + P.data()[1] * Y + P.data()[2] * Z + P.data()[3];
-	const float hy = P.data()[4] * X + P.data()[5] * Y + P.data()[6] * Z + P.data()[7];
-	const float hz = P.data()[8] * X + P.data()[9] * Y + P.data()[10] * Z + P.data()[11];
-	const float invhz = 1.0f / hz;
-	x = (T)(hx*invhz + 0.5f);
-	y = (T)(hy*invhz + 0.5f);
-}
-template<typename T>
 void CMesh::GetPoint(const int i, T& x, T& y, T& z)
 {
 	const auto obj = mPoints[i];
 	x = T(obj[0]);
 	y = T(obj[1]);
 	z = T(obj[2]);
-}
-template<typename T, typename T2>
-void CMesh::GetPoint(const int i, T& x, T& y, T& z, T2& w)
-{
-	const auto obj = mPoints[i];
-	x = T(obj[0]);
-	y = T(obj[1]);
-	z = T(obj[2]);
-	w = T(obj[3]);
 }
 
 inline void CMesh::GetPatch(int i, int& x, int& y, int& z)

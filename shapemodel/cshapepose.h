@@ -9,6 +9,7 @@ class CShapePose
 {
 private:
 	CMesh initMesh_bk;
+	/*For shape param, each param may be different in its scale, hence use evalue to make them in a same scale, which is better for solving*/
 	miniBLAS::Vertex evalue[5];
 	int getpose(const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
 		const uint32_t numEigenVectors, double* pointsOut, double* jointsOut);
@@ -17,10 +18,13 @@ public:
 	CShapePose(const std::string& modelFileName);
 	/*pre-compute mesh data based on validmask*/
 	PtrModSmooth preCompute(const int8_t *__restrict validMask) const { return initMesh_bk.preCompute(validMask); };
-	/*For pose-solving, shape param remains unchanged, hence fitShapeChangesToMesh and */
-	miniBLAS::VertexVec getBaseModel(const double *__restrict shapeParamsIn) const;
+	/*For pose-solving, shape param remains unchanged, hence fitShapeChangesToMesh and updJoint can be calc only once
+	 *Function return a CMesh, which can be passed to getModelByPose
+	 **/
+	CMesh getBaseModel(const double *__restrict shapeParamsIn) const;
+	/*use validMask to precompute validPts, returning CMesh's smoothparam is also set to precompute value*/
 	CMesh getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const;
-	miniBLAS::VertexVec getModelByPose(const miniBLAS::VertexVec& basePoints, const double *__restrict poseParamsIn) const;
+	miniBLAS::VertexVec getModelByPose(const CMesh& baseMesh, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelByPose2(const CMesh& baseMesh, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const;
 	miniBLAS::VertexVec getModelFast2(const PtrModSmooth mSmooth, const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn,

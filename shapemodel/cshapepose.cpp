@@ -24,7 +24,7 @@ int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsI
 	const uint32_t numEigenVectors, double* pointsOut, double* jointsOut)
 {
 	// Read object model
-	CMesh initMesh = initMesh_bk;
+	CMesh initMesh(initMesh_bk, false);
 
 	initMesh.fastShapeChangesToMesh(shapeParamsIn, numEigenVectors, eigenVectorsIn);
 
@@ -76,10 +76,10 @@ int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsI
 		initMesh.GetPoint(i, pointsOut[i], pointsOut[i + nPoints], pointsOut[i + 2 * nPoints]);
 	return 0;
 }
-VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
+CMesh CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 {
 	// Read object model
-	CMesh mesh(initMesh_bk, nullptr);
+	CMesh baseMesh(initMesh_bk, true);
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
@@ -89,13 +89,22 @@ VertexVec CShapePose::getBaseModel(const double *__restrict shapeParamsIn) const
 			*pShape++ = shapeParamsIn[a] * (*pEV++);
 		}
 	}
-	mesh.fastShapeChangesToMesh(vShape);
-	return std::move(mesh.vPoints);
+	baseMesh.fastShapeChangesToMesh(vShape);
+	// update joints
+	baseMesh.updateJntPosEx();
+	/*IMPORTANT!!!!
+	*This function relys on copy elision since operator= of CMesh is alway the old version of copy.
+	*However, since there is no default copy constructor(only CMesh(CMesh,bool)), there is no default move constructor, neither.
+	*That means, when using the return value to initializing an CMesh, compiler will tends to use copy elision.
+	*If copy elision failed and compiler use operator=, some data will not be copied right, and later function may throw error.
+	*The best way to solve this is to remove old version codes in CMesh
+	**/
+	return baseMesh;
 }
 CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const int8_t *__restrict validMask) const
 {
 	// Read object model
-	CMesh baseMesh(initMesh_bk, nullptr);
+	CMesh baseMesh(initMesh_bk, true);
 	Vertex vShape[5];
 	{
 		float *__restrict pShape = vShape[0];
@@ -109,15 +118,19 @@ CMesh CShapePose::getBaseModel2(const double *__restrict shapeParamsIn, const in
 	// update joints
 	baseMesh.updateJntPosEx();
 	baseMesh.modsmooth = baseMesh.preCompute(validMask);
+	/*IMPORTANT!!!!
+	 *This function relys on copy elision since operator= of CMesh is alway the old version of copy.
+	 *However, since there is no default copy constructor(only CMesh(CMesh,bool)), there is no default move constructor, neither.
+	 *That means, when using the return value to initializing an CMesh, compiler will tends to use copy elision.
+	 *If copy elision failed and compiler use operator=, some data will not be copied right, and later function may throw error.
+	 *The best way to solve this is to remove old version codes in CMesh
+	 **/
 	return baseMesh;
 }
-VertexVec CShapePose::getModelByPose(const VertexVec& basePoints, const double *__restrict poseParamsIn) const
+VertexVec CShapePose::getModelByPose(const CMesh& baseMesh, const double *__restrict poseParamsIn) const
 {
 	// Read object model
-	CMesh mesh(initMesh_bk, &basePoints);
-
-	// update joints
-	mesh.updateJntPosEx();
+	CMesh mesh(baseMesh, true);
 
 	// read motion params from the precomputed 3D poses
 	CVector<double> mParams(POSPARAM_NUM);
@@ -156,7 +169,7 @@ VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__res
 VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn) const
 {
 	// Read object model
-	CMesh mesh(initMesh_bk, nullptr);
+	CMesh mesh(initMesh_bk, true);
 
 	Vertex vShape[5];
 	{
@@ -191,7 +204,7 @@ VertexVec CShapePose::getModelFast2(const PtrModSmooth mSmooth,
 	const double *__restrict shapeParamsIn, const double *__restrict poseParamsIn, const int8_t *__restrict validMask) const
 {
 	// Read object model
-	CMesh mesh(initMesh_bk, nullptr);
+	CMesh mesh(initMesh_bk, true);
 	mesh.modsmooth = mSmooth;
 
 	Vertex vShape[5];

@@ -14,6 +14,7 @@ using miniBLAS::VertexVec;
 
 static atomic_uint64_t runcnt(0), runtime(0), selftime(0);
 
+/*basic clculation, Point to Point distance only*/
 template<typename CHILD>
 struct NormalCostFunctor
 {
@@ -47,14 +48,14 @@ public:
 struct PoseCostFunctor : public NormalCostFunctor<PoseCostFunctor>
 {
 protected:
-	const VertexVec basePts;
+	const CMesh baseMesh;
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose(basePts, pose);
+		return shapepose->getModelByPose(baseMesh, pose);
 	}
 	PoseCostFunctor(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<int8_t>& isValid_, const miniBLAS::VertexVec& scanCache_)
-		: NormalCostFunctor<PoseCostFunctor>(shapepose_, isValid_, scanCache_), basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+		: NormalCostFunctor<PoseCostFunctor>(shapepose_, isValid_, scanCache_), baseMesh(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
 	}
 };
@@ -73,6 +74,7 @@ public:
 	}
 };
 
+/*simple optimization, Point to Point distance only. Use validMask to accelerate*/
 template<typename CHILD>
 struct EarlyCutCostFunctor
 {
@@ -146,6 +148,7 @@ public:
 };
 
 
+/*simple optimization, Point to TangentSurface distance with penalty. Use validMask to accelerate*/
 template<typename CHILD>
 struct EarlyCutP2SCostFunctor
 {
@@ -176,8 +179,11 @@ public:
 		const __m128 absmask = _mm_castsi128_ps(_mm_set1_epi32(INT32_MAX));
 		for (uint32_t j = 0; j < count; ++j)
 		{
+			/*len2 is the absolute value of the square of the distance between point and the surface*/
 			const __m128 len2 = _mm_and_ps(_mm_dp_ps(pts[j] - scanCache[j], normCache[j], 0x7f), absmask);
+			/*penalty(weight) is stored in scanCache's w, so multiply the len with it*/
 			const __m128 vcurlen = _mm_mul_ps(_mm_sqrt_ps(len2)/*l,l,l,l*/, _mm_permute_ps(scanCache[j], 0xff)/*w,w,w,w*/);
+			/*cast float to double, SSE instrin may be faster*/
 			residual[j] = _mm_cvtsd_f64(_mm_cvtps_pd(vcurlen));
 		}
 		memset(&residual[count], 0, sizeof(double) * (EVALUATE_POINTS_NUM - count));
@@ -222,13 +228,14 @@ public:
 	}
 };
 
+/*Point to TangentSurface distance with penalty. unmatched points are calculated with predict points*/
 struct PoseCostFunctorPred
 {
 protected:
 	// this should be the firtst to declare in order to be initialized before other things
 	const CShapePose *shapepose_;
 	const VertexVec ptCache;
-	const VertexVec basePt;
+	const CMesh baseMesh;
 	const std::vector<float> weights;
 
 	static VertexVec buildCache(CShapePose *shapepose, const ModelParam& modelParam, const arColIS& isValidNN, const VertexVec& validScanCache_)
@@ -256,14 +263,14 @@ public:
 	PoseCostFunctorPred(CShapePose *shapepose, const ModelParam& modelParam, const ModelParam& preParam, const arColIS isValidNN, const miniBLAS::VertexVec& validScanCache,
 		const std::vector<float>& wgts = std::vector<float>())
 		: shapepose_(shapepose), weights(buildCache(isValidNN, wgts)),
-		basePt(shapepose_->getBaseModel(modelParam.shape.data())), ptCache(buildCache(shapepose, preParam, isValidNN, validScanCache))
+		baseMesh(shapepose_->getBaseModel(modelParam.shape.data())), ptCache(buildCache(shapepose, preParam, isValidNN, validScanCache))
 	{
 	}
 	bool operator()(const double *pose, double *residual) const
 	{
 		SimpleTimer timer;
 
-		const auto pts = shapepose_->getModelByPose(basePt, pose);
+		const auto pts = shapepose_->getModelByPose(baseMesh, pose);
 		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
 		{
 			residual[j] = (ptCache[j] - pts[j]).length() * weights[j];
@@ -276,6 +283,7 @@ public:
 };
 
 
+/*basic clculation of reverse search, Point to Point distance with penalty. idxMapper is needed since model-points may be less than object-points*/
 template<typename CHILD>
 struct ReverseCostFunctor
 {
@@ -322,15 +330,15 @@ public:
 struct PoseCostRe : public ReverseCostFunctor<PoseCostRe>
 {
 protected:
-	const VertexVec basePts;
+	const CMesh baseMesh;
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose(basePts, pose);
+		return shapepose->getModelByPose(baseMesh, pose);
 	}
 	PoseCostRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
 		const VertexVec& scanCache_) 
-		: ReverseCostFunctor<PoseCostRe>(shapepose_, idxMapper_, weights_, scanCache_), basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+		: ReverseCostFunctor<PoseCostRe>(shapepose_, idxMapper_, weights_, scanCache_), baseMesh(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
 	}
 };
@@ -351,6 +359,9 @@ public:
 };
 
 
+/*reverse search with shift, Point to Point distance with penalty. idxMapper is needed since model-points may be less than object-points
+ *shift means that, among multi object-points with the same model-points, choose the shortest one
+ **/
 template<typename CHILD>
 struct ReverseShiftCostFunctor
 {
@@ -360,12 +371,14 @@ protected:
 	std::vector<uint32_t> idxMapper;
 	VertexVec scanCache;
 	uint32_t count;
-	ReverseShiftCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
+	ReverseShiftCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
+		const VertexVec& scanCache_)
 		: shapepose(shapepose_), idxMapper(idxMapper_), scanCache(scanCache_), count(scanCache_.size())
 	{
 		for (uint32_t idx = 0; idx < count; ++idx)
 			scanCache[idx].w = weights_[idx];
 	}
+	/*for predict version, predict points are inserted into cache here, with given weight*/
 	ReverseShiftCostFunctor(const CShapePose *shapepose_, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
 		const VertexVec& scanCache_, const ModelParam& predParam, const float fillwgt)
 		: shapepose(shapepose_), idxMapper(idxMapper_)
@@ -396,23 +409,7 @@ public:
 		SimpleTimer timer, t2;
 		const VertexVec pts = ((const CHILD&)(*this)).getPts(param);
 		t2.Start();
-		/*
-		float finwgt[EVALUATE_POINTS_NUM] = { 0 };
-		memset(residual, 0x7f, sizeof(double) * EVALUATE_POINTS_NUM);
-		uint32_t i = 0;
-		for (const auto& obj : scanCache)
-		{
-		const uint32_t idx = idxMapper[i++];
-		const double val = (obj - pts[idx]).length_sqr();
-		if (val < residual[idx])
-		{
-		residual[idx] = val;
-		finwgt[idx] = obj.w;
-		}
-		}
-		for (uint32_t j = 0; j < EVALUATE_POINTS_NUM; ++j)
-		residual[j] = finwgt[j] * sqrt(residual[j]);
-		*/
+
 		Vertex weight[EVALUATE_POINTS_NUM / 4 + 1], tmp[EVALUATE_POINTS_NUM / 4 + 1];
 		memset(weight, 0x0, sizeof(weight)); memset(tmp, 0x7f, sizeof(tmp));
 		float *__restrict finwgt = (float*)weight, *__restrict pTmp = (float*)tmp;
@@ -447,16 +444,16 @@ public:
 struct PoseCostRShift : public ReverseShiftCostFunctor<PoseCostRShift>
 {
 protected:
-	const VertexVec basePts;
+	const CMesh baseMesh;
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose(basePts, pose);
+		return shapepose->getModelByPose(baseMesh, pose);
 	}
 	PoseCostRShift(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
 		const VertexVec& scanCache_)
 		: ReverseShiftCostFunctor<PoseCostRShift>(shapepose_, idxMapper_, weights_, scanCache_),
-		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+		baseMesh(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
 	}
 };
@@ -475,14 +472,15 @@ public:
 	{
 	}
 };
+/*with predict*/
 struct PoseCostRPredShift : public ReverseShiftCostFunctor<PoseCostRPredShift>
 {
 protected:
-	const VertexVec basePts;
+	const CMesh baseMesh;
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose(basePts, pose);
+		return shapepose->getModelByPose(baseMesh, pose);
 	}
 	inline VertexVec getPts(const ModelParam& predParam) const
 	{
@@ -491,7 +489,7 @@ public:
 	PoseCostRPredShift(const CShapePose *shapepose_, const ModelParam& modelParam, const ModelParam& predParam, const float fillwgt,
 		const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_, const VertexVec& scanCache_)
 		: ReverseShiftCostFunctor<PoseCostRPredShift>(shapepose_, idxMapper_, weights_, scanCache_, predParam, fillwgt),
-		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+		baseMesh(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
 	}
 };
@@ -516,6 +514,7 @@ public:
 };
 
 
+/*reverse search, Point to TangentSurface distance with penalty. idxMapper is needed since model-points may be less than object-points*/
 template<typename CHILD>
 struct ReverseP2SCostFunctor
 {
@@ -568,16 +567,16 @@ public:
 struct PoseCostP2SRe : public ReverseP2SCostFunctor<PoseCostP2SRe>
 {
 protected:
-	const VertexVec basePts;
+	const CMesh baseMesh;
 public:
 	inline VertexVec getPts(const double* pose) const
 	{
-		return shapepose->getModelByPose(basePts, pose);
+		return shapepose->getModelByPose(baseMesh, pose);
 	}
 	PoseCostP2SRe(const CShapePose *shapepose_, const ModelParam& modelParam, const std::vector<uint32_t>& idxMapper_, const std::vector<float>& weights_,
 		const VertexVec& scanCache_, const VertexVec& normCache_)
 		: ReverseP2SCostFunctor<PoseCostP2SRe>(shapepose_, idxMapper_, weights_, scanCache_, normCache_),
-		basePts(shapepose_->getBaseModel(modelParam.shape.data()))
+		baseMesh(shapepose_->getBaseModel(modelParam.shape.data()))
 	{
 	}
 };
@@ -598,7 +597,13 @@ public:
 };
 
 
-
+/*constrain when solving pose.
+ *Due to mono-camera, some parts of body may not be capture and no match link will be found.
+ *That means whatever the joints param changes, residual won't change, which may cause big error.
+ *This functor applys direct to the param, input weight is the total-error calculated during match-searching.
+ *Though the input error may not be the same with costfunctor's result, they are in the same scale.
+ *First 6 params are associate with total movement of model, which will not be considered.
+ **/
 struct MovementSofter
 {
 protected:
@@ -617,6 +622,12 @@ public:
 		return true;
 	}
 };
+/*constrain when solving shape.
+*Due to mono-camera, some parts of body may not be capture and no match link will be found.
+*That means solving result may not be accurate and may differ a lot from the last result.
+*This functor applys direct to the param, input weight is the total-error calculated during match-searching.
+*Though the input error may not be the same with costfunctor's result, they are in the same scale.
+**/
 struct ShapeSofter
 {
 protected:
@@ -632,6 +643,7 @@ public:
 	}
 };
 
+/*Function to calculate y = a+bx+cx^2*/
 struct PNCalc
 {
 	template <typename T>
@@ -641,6 +653,7 @@ struct PNCalc
 		return x[0] + x[1] * val + x[2] * ceres::pow(val, 2);
 	}
 };
+/*Function to calculate y = a+bx+c*sin(d+x)*/
 struct PSCalc
 {
 	template <typename T>
@@ -650,6 +663,11 @@ struct PSCalc
 		return x[0] + x[1] * val + x[2] * ceres::sin(val + x[3]);
 	}
 };
+/*Accept function and try to fit curve using that function's format
+ *It directly applys to pose's NO.idx param.
+ *There is no definate function to predict pose, so PNCalc which has x^2 may cause high error.
+ *Hence joints usaully use PSCalc, whose sin may stop error.
+ */
 template<typename C>
 struct ParamPredictor
 {
@@ -662,13 +680,17 @@ public:
 	template <typename T>
 	bool operator ()(const T* const x, T* residual) const
 	{
-		const uint8_t step = 2;
-		const uint32_t framesize = params.size();
-		const uint32_t maxcnt = calcCount(framesize);
-		for (uint32_t i = framesize - 1, j = 0; j < maxcnt; i--, j++)
+		const int32_t framesize = params.size();
+		const int32_t maxcnt = calcCount(framesize);
+		/*predict based on past frames, while further the frame, lesser impact on prediction.
+		 *The way to control its impact is multiply difference with weight.
+		 *Since ceres will try to eliminate every difference and this function is somehow too simple for it,
+		 *I have to make the weight extremely low.
+		 **/
+		for (int32_t i = framesize - 1, j = 0; j < maxcnt; i--, j++)
 		{
-			const uint32_t level = j / step;
-			const T weight = T(1.0) / T(std::pow(level, level));//1/n^n
+			const int32_t level = j / 2 * 3;//level increases every 2 frames, while every time it increase 3
+			const T weight = ceres::pow(T(2), T(-level));//2^(-n)
 			const T obj = C::calcute(x, i);
 			residual[j] = weight * (T(params[i].pose[idx]) - obj);
 		}
@@ -676,7 +698,7 @@ public:
 	}
 	static uint32_t calcCount(const uint32_t frames)
 	{
-		return std::min(frames, (uint32_t)16);
+		return std::min(frames, (uint32_t)14);
 	}
 };
 template<typename C>
@@ -685,20 +707,20 @@ struct ParamSofter
 protected:
 	const std::vector<ModelParam>& params;
 	const uint8_t idx;
-	const uint32_t objframe;
+	const int32_t objframe;
 public:
 	using Calc = C;
 	ParamSofter(const std::vector<ModelParam>& params_, const uint32_t frame_, const uint8_t idx_) :params(params_), idx(idx_), objframe(frame_) { }
 	template <typename T>
 	bool operator ()(const T* const x, T* residual) const
 	{
-		const uint32_t maxframe = std::min(uint32_t(params.size() - 1), objframe + 8);
-		const uint32_t minframe = objframe >= 8 ? (objframe - 8) : 0;
+		const int32_t maxframe = std::min(int32_t(params.size() - 1), objframe + 8);
+		const int32_t minframe = objframe >= 8 ? (objframe - 8) : 0;
 
-		for (uint32_t i = minframe, j = 0; i < maxframe; i++, j++)
+		for (int32_t i = minframe, j = 0; i < maxframe; i++, j++)
 		{
-			const uint32_t level = 1 + (objframe >= i ? (objframe - i) : (i - objframe));
-			const T weight = T(1.0) / T(std::pow(2, level));//1/2^n
+			const int32_t level = std::max((std::abs((int32_t)objframe - i) - 1), 0);//0,+/-1,frame are in the same level
+			const T weight = ceres::pow(T(2), T(-level));//2^(-n)
 			const T obj = C::calcute(x, i);
 			residual[j] = weight * (T(params[i].pose[idx]) - obj);
 		}

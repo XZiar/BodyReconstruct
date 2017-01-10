@@ -185,9 +185,13 @@ private:
 
 	struct FitParam
 	{
+		//whether solve pose and shape
 		bool isSPose, isSShape;
+		//additional param
 		uint32_t param;
+		//angle limit, which may differ among different frames
 		double anglim;
+		//solve option to use
 		ceres::Solver::Options option;
 	};
 	/** @brief fitShapePose
@@ -209,7 +213,9 @@ private:
 	void solveAllShape(const ceres::Solver::Options& options, const double angLim);
 	void solveAllShapeRe(const ceres::Solver::Options& options, const double angLim);
 	
+	/*perform prediction, result stores in predParam.*/
 	void predictPose();
+	/*perform prediction for soften movement in the final solve stage.solveGlobal means whether predict first 6 params(global movement)*/
 	void predSoftPose(const bool solveGlobal);
 
 	void buildModelColor();
@@ -220,7 +226,9 @@ private:
 	std::vector<float> nnFilter(const miniBLAS::NNResult& res, arColIS& isValid, const miniBLAS::VertexVec& scNorms, const double angLim);
 	void raytraceCut(miniBLAS::NNResult& res) const;
 
+	/*perform search and update templete. errors and matched points are also calculated.*/
 	uint32_t updatePoints(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, arColIS &isValidNN_rtn, double &err);
+	/*reverse version of updatepoints, point cache is immediately filled here.*/
 	uint32_t updatePointsRe(const CScan& scan, const ModelParam& mPar, const double angLim, std::vector<uint32_t>& idxs, miniBLAS::VertexVec& ptCache, double &err);
 	/** @brief showResult
 	 ** it must be called after updatepoints cause it skip the update precess

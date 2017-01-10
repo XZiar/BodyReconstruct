@@ -50,6 +50,7 @@ uint64_t getCurTimeNS();
 void sleepMS(uint32_t ms);
 bool yesORno(const char *str, const bool expect = true);
 int inputNumber(const char *str, const int32_t expect);
+/*whether in vtune mode(profile test mode, remove some input using default value)*/
 extern bool isVtune;
 
 struct SimpleTimer

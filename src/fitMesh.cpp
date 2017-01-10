@@ -1896,7 +1896,7 @@ void fitMesh::showFrame(const uint32_t frame)
 	if (frame >= scanFrames.size())
 		return;
 	if (isShowOrigin)
-		tempbody.updPoints(shapepose.getBaseModel(modelParams[frame].Pshape()));
+		tempbody.updPoints(shapepose.getBaseModel(modelParams[frame].Pshape()).vPoints);
 	else if (isBlockPose)
 	{
 		ModelParam tmpmp; tmpmp.shape = modelParams[frame].shape;
