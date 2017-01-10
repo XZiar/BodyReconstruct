@@ -9,11 +9,13 @@ class CShapePose
 {
 private:
 	CMesh initMesh_bk;
+	miniBLAS::Vertex bodysize, paramscale;
 	/*For shape param, each param may be different in its scale, hence use evalue to make them in a same scale, which is better for solving*/
 	miniBLAS::Vertex evalue[5];
 	int getpose(const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
 		const uint32_t numEigenVectors, double* pointsOut, double* jointsOut);
-
+	// read motion params from the precomputed 3D poses
+	CVector<double> getPoseVec(const double *poseParamsIn) const;
 public:
 	CShapePose(const std::string& modelFileName);
 	/*pre-compute mesh data based on validmask*/

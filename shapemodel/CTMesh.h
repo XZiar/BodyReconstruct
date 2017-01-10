@@ -253,6 +253,7 @@ public:
 
 	miniBLAS::VertexVec vPoints;
 	miniBLAS::VertexVec validPts;
+	miniBLAS::Vertex bodysize;
 protected:
 	bool isCopy = false;
 	void CheckCopy(const bool allow)

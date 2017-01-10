@@ -1215,8 +1215,8 @@ void fitMesh::predSoftPose(const bool solveGlobal)
 	}
 	for (uint32_t a = 6; a < POSPARAM_NUM; ++a)
 	{
-		auto *cost_function = new ceres::AutoDiffCostFunction<JointAniSofter, ceres::DYNAMIC, 4>(
-			new JointAniSofter(modelParams, curFrame, a), maxcnt);
+		auto *cost_function = new ceres::AutoDiffCostFunction<PoseAniSofter, ceres::DYNAMIC, 4>(
+			new PoseAniSofter(modelParams, curFrame, a), maxcnt);
 		probJoint.AddResidualBlock(cost_function, NULL, npp[a]);
 	}
 	Solver::Summary summary;
@@ -1241,7 +1241,7 @@ void fitMesh::predSoftPose(const bool solveGlobal)
 	else
 		predMParam.pose = modelParams[curFrame].pose;
 	for (uint32_t a = 6; a < POSPARAM_NUM; ++a)
-		predMParam.pose[a] = JointAniSofter::Calc::calcute(npp[a], curFrame);
+		predMParam.pose[a] = PoseAniSofter::Calc::calcute(npp[a], curFrame);
 	//printf("poly-n predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
 	//getchar();
 	predMParam.shape = curMParam.shape;
@@ -1270,7 +1270,8 @@ std::vector<float> fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& isV
 {
 	vector<float> weights;
 	isValid.swap(arColIS(tempbody.nPoints, 0));
-	const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+	/*limcos is half of the cos of angleLimit, which means angles less than half of angleLimit are accurate and get no penalty*/
+	const float mincos = cos(M_PI * angLim / 180), limcos = cos(M_PI_2 * angleLimit / 180), cosInv = 1.0 / limcos;
 	for (uint32_t i = 0; i < tempbody.nPoints; i++)
 	{
 		const int idx = res.idxs[i];
@@ -1302,7 +1303,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		for (uint32_t a = 0; a < tempbody.nPoints; ++a)
 		{
 			const auto thecos = norm[a] % normex[a];
-			const auto ang = 180 * (std::acos(thecos) / 3.1415926);
+			const auto ang = 180 * (std::acos(thecos) / M_PI);
 			printf("norm %d, ang: %f\n", a, ang);
 		}
 		getchar();
@@ -1404,7 +1405,8 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 		//weights = vector<float>(scan.nPoints, 0);
 		weights.clear(); idxs.clear(); ptCache.clear(); normalCache.clear();
 		float distAll = 0;
-		const float mincos = cos(3.1415926 * angLim / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+		/*limcos is half of the cos of angleLimit, which means angles less than half of angleLimit are accurate and get no penalty*/
+		const float mincos = cos(M_PI * angLim / 180), limcos = cos(M_PI_2 * angleLimit / 180), cosInv = 1.0 / limcos;
 		for (uint32_t i = 0; i < scan.nPoints; i++)
 		{
 			auto& idx = nnres.idxs[i];
@@ -1487,7 +1489,8 @@ void fitMesh::buildModelColor()
 			scan.nntree.MAXDist2 = 1e3f;
 			scan.nntree.searchOnAnglePan(nnres, tempbody.vPts, tempbody.vNorms, angleLimit, angleLimit / 2);
 			{
-				const float mincos = cos(3.1415926 * angleLimit / 180), limcos = cos(3.1415926 * angleLimit / 360), cosInv = 1.0 / limcos;
+				/*limcos is half of the cos of angleLimit, which means angles less than half of angleLimit are accurate and get no penalty*/
+				const float mincos = cos(M_PI * angleLimit / 180), limcos = cos(M_PI_2 * angleLimit / 180), cosInv = 1.0 / limcos;
 				for (uint32_t i = 0; i < tempbody.nPoints; i++)
 				{
 					const auto idx = nnres.idxs[i];

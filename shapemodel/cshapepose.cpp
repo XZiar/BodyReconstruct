@@ -18,6 +18,22 @@ CShapePose::CShapePose(const string& modelFileName)
 	initMesh_bk.updateJntPos();
 	initMesh_bk.centerModel();
 	initMesh_bk.prepareData();
+	bodysize = initMesh_bk.bodysize;
+	//paramscale = bodysize / PI, try to make max global body movement in the same scale as joints's retate angle(in radian)
+	paramscale = bodysize * M_1_PI; 
+}
+
+CVector<double> CShapePose::getPoseVec(const double *poseParamsIn) const
+{
+	CVector<double> mParams(POSPARAM_NUM);
+	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
+	{
+		mParams(i) = poseParamsIn[i];
+	}
+	mParams[3] *= paramscale.x;
+	mParams[4] *= paramscale.y;
+	mParams[5] *= paramscale.z;
+	return mParams;
 }
 
 int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsIn, const double *eigenVectorsIn,
@@ -31,12 +47,7 @@ int CShapePose::getpose(const double* motionParamsIn, const double* shapeParamsI
 	// update joints
 	initMesh.updateJntPos();
 
-	// read motion params from the precomputed 3D poses
-	CVector<double> mParams(POSPARAM_NUM);
-	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
-	{
-		mParams(i) = motionParamsIn[i];
-	}
+	auto mParams = getPoseVec(motionParamsIn);
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 #ifndef EXEC_FAST
@@ -132,12 +143,7 @@ VertexVec CShapePose::getModelByPose(const CMesh& baseMesh, const double *__rest
 	// Read object model
 	CMesh mesh(baseMesh, true);
 
-	// read motion params from the precomputed 3D poses
-	CVector<double> mParams(POSPARAM_NUM);
-	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
-	{
-		mParams(i) = poseParamsIn[i];
-	}
+	auto mParams = getPoseVec(poseParamsIn);
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
@@ -152,12 +158,7 @@ VertexVec CShapePose::getModelByPose2(const CMesh& baseMesh, const double *__res
 	// Read object model
 	CMesh mesh(baseMesh, true);
 
-	// read motion params from the precomputed 3D poses
-	CVector<double> mParams(POSPARAM_NUM);
-	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
-	{
-		mParams(i) = poseParamsIn[i];
-	}
+	auto mParams = getPoseVec(poseParamsIn);
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
@@ -185,12 +186,7 @@ VertexVec CShapePose::getModelFast(const double *__restrict shapeParamsIn, const
 	// update joints
 	mesh.updateJntPosEx();
 
-	// read motion params from the precomputed 3D poses
-	CVector<double> mParams(POSPARAM_NUM);
-	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
-	{
-		mParams(i) = poseParamsIn[i];
-	}
+	auto mParams = getPoseVec(poseParamsIn);
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 
@@ -221,12 +217,7 @@ VertexVec CShapePose::getModelFast2(const PtrModSmooth mSmooth,
 	// update joints
 	mesh.updateJntPosEx();
 
-	// read motion params from the precomputed 3D poses
-	CVector<double> mParams(POSPARAM_NUM);
-	for (uint32_t i = 0; i < POSPARAM_NUM; i++)
-	{
-		mParams(i) = poseParamsIn[i];
-	}
+	auto mParams = getPoseVec(poseParamsIn);
 	CMatrix<float> mRBM(4, 4);
 	NRBM::RVT2RBM(&mParams, mRBM);
 

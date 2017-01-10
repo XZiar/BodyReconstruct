@@ -655,11 +655,15 @@ void CMesh::prepareData()
 		vPoints.resize(mNumPoints + 7);//at lest multiply of 8
 		memset(&vPoints[mNumPoints], 0x0, 7 * sizeof(Vertex));
 		modsmooth->ptSmooth.clear();
+		//calculate model's xyz difference(width, length, height)
+		__m128 mmax = _mm_setzero_ps(), mmin = _mm_setzero_ps();
 		for (uint16_t a = 0; a < mNumPoints; ++a)
 		{
 			//mPoints holds xyz of point, then each 2 float represent joint-id(1 based) and weight
 			const float *ptr = mPoints[a].data();
 			vPoints[a].assign(ptr);
+			mmax = _mm_max_ps(mmax, vPoints[a]);
+			mmin = _mm_min_ps(mmin, vPoints[a]);
 			//w should be manually set to 1 while applying affine transformation on the 3d-points pos
 			vPoints[a].w = 1;
 			vector<ModelSmooth::SmoothParam> tmpsp;
@@ -688,6 +692,7 @@ void CMesh::prepareData()
 				objspv.insert(objspv.end(), tmpsp.begin(), tmpsp.end());
 			}
 		}
+		bodysize.assign(_mm_sub_ps(mmax, mmin));
 		uint32_t scidx = 0;
 		//gather 4 kinds of smooth-param to one vector---try to be more cache-friendly
 		for (auto& spg : spgroup)
