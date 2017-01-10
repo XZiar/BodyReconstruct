@@ -133,6 +133,33 @@ void CTemplate::init(const arma::mat& p, const arma::mat& f)
 	}
 }
 
+void CTemplate::init(uint32_t ptCount, miniBLAS::VertexVec&& pts, const arma::mat& f)
+{
+	nPoints = ptCount;
+	points = arma::mat(nPoints, 3);
+	updPoints(std::move(pts));
+
+	faces = f;
+	nFaces = faces.n_rows;
+	vFaces.resize(nFaces);
+	faceMap.resize(nPoints, UINT32_MAX);
+	const double *px = faces.memptr(), *py = px + nFaces, *pz = py + nFaces;
+	for (uint32_t i = 0; i < nFaces; ++i)
+	{
+		auto& objidx = vFaces[i].pidx;
+		objidx.assign(int32_t(px[i]), int32_t(py[i]), int32_t(pz[i]), 65536);
+		auto& tx = faceMap[objidx.x];
+		if (tx == UINT32_MAX)
+			tx = i;
+		auto& ty = faceMap[objidx.y];
+		if (ty == UINT32_MAX)
+			ty = i;
+		auto& tz = faceMap[objidx.z];
+		if (tz == UINT32_MAX)
+			tz = i;
+	}
+}
+
 void CTemplate::updPoints()
 {
 	vPts.resize(nPoints);
@@ -428,11 +455,14 @@ bool fitMesh::loadScan(CScan& scan)
   */
 void fitMesh::loadTemplate()
 {
+	//do not load points from fiel cause they will be override in later calculation
+	/*
 	arma::mat pts;
 	//template.mat should be pre-calculated : meanshape.mat-mean(meanshape)
 	pts.load(dataDir + "template.mat");
 	printf("Template points loaded: %zu,%zu\n", pts.n_rows, pts.n_cols);
-	
+	*/
+
 	arma::mat faces;
 	faces.load(dataDir + "faces.mat");
 	printf("Template faces loaded: %zu,%zu\n", faces.n_rows, faces.n_cols);
@@ -444,7 +474,9 @@ void fitMesh::loadTemplate()
 	//    cout<<"Landmark indexes loaded: "<<landmarksIdxes.n_rows<<endl;
 	tempbody.landmarksIdx = landmarksIdxes;
 
-	tempbody.init(pts, faces);
+	//points of tempbody are from shapepose with zero-params
+	auto pts = shapepose.getModelFast(curMParam.Pshape(), curMParam.Ppose());
+	tempbody.init(shapepose.getMeshPointCount(), std::move(pts), faces);
 	tempbody.calcFaces();
 }
 
@@ -508,7 +540,7 @@ arma::mat fitMesh::rigidAlignFix(const arma::mat& input, const arma::mat& R, dou
         arma::vec sret = searchShoulder(input*R, lv, sAvgWid, sAvgDep, sMaxDep);
         arma::vec tret = searchShoulder(tempbody.points, lv, tAvgWid, tAvgDep, tMaxDep);
 
-		const double sST = sret(0) / tret(0);
+		const double sST = sret(1) / tret(1);//scale
 		const double sWidLow = 0.12*sret(0), sWidHi = 0.2*sret(0);
         const double tWidLow = 0.12*tret(0), tWidHi = 0.2*tret(0);
         for(unsigned int a=0; a <= lv; ++a)
@@ -551,6 +583,7 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     arma::vec eig_val;
     arma::mat scpoint;
     {
+		//all the sequence are from fixed camera. baseShift is kept in order to make sure later rotate will be in the same coordinate 
 		baseShift = meanpoints = mean(scanbody.points,0);
 		scpoint = scanbody.points.each_row() - meanpoints;
         arma::mat sctmppoint = scpoint.t()*scpoint;
@@ -563,7 +596,8 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     }
 
     {
-        meanpoints = mean(tempbody.points,0);
+		//tempbody's points are from CMesh, so there should not be any calculation on it. totalShift is used as a backup now
+		totalShift = meanpoints = mean(tempbody.points,0);
         arma::mat tppoint = tempbody.points.each_row() - meanpoints;
         tppoint = tppoint.t()*tppoint;
         if(! arma::eig_sym(eig_val,eig_vec,tppoint))
@@ -619,24 +653,20 @@ void fitMesh::rigidAlignTemplate2ScanPCA(CScan& scanbody)
     //cout<<"the scale is: "<<s<<endl;
     //translate the scan points
 
-    meanpoints = mean(tempbody.points,0);
-    meanpoints(1) = dDepth;
-    meanpoints(2) += min_t(2) - min_s(2)/s;//align to the foot by moving
+    //after shoulder fix, override y to make their shoulder in the same place
+	totalShift(1) = dDepth;
+	totalShift(2) += min_t(2) - min_s(2)/s;//align to the foot by moving
 
     scpoint /= s;
-    scanbody.points = scpoint.each_row() + meanpoints;
+    scanbody.points = scpoint.each_row() + totalShift;
 	{
 		rotateMat = R;
 		totalScale = s;
-		totalShift = meanpoints;
+		
+		//assume camera at (0,0,0) at first
 		const arma::mat cpos = (-baseShift) * (R / totalScale);
 		camPos.assign(cpos(0), cpos(1), cpos(2));
 	}
-    arma::mat T(4, 4, arma::fill::zeros);
-    T.submat(0,0,2,2) = R/s;
-    T(3,3) = 1;
-    T.submat(0,3,2,3) = meanpoints.t();
-	scanbody.T = T;
 
     //Translate the landmarks
     if(!scanbody.landmarks.empty())
@@ -1008,6 +1038,7 @@ void fitMesh::fitFinal(const std::vector<FitParam>& fitparams)
 		const auto& pret = fitparams[a];
 		if (pret.isSPose)//solvepose
 		{
+			//sadly there is only non-reverse version
 			solveAllPose(options, pret.anglim, pret.param & 0b1);
 		}
 		else if (pret.isSShape)//solveshape
@@ -1037,6 +1068,7 @@ void fitMesh::solveAllPose(const ceres::Solver::Options& options, const double a
 		printFrame(curFrame);
 		curMParam.pose = modelParams[curFrame].pose;
 		if (dopred && curFrame > 0 && curFrame < modelParams.size() - 1)
+			//sadly when choosing point-surface mode, pose-softer will not working, since there no functor support both p2s and pred
 			predSoftPose(false);
 		else
 			predMParam.pose = curMParam.pose;
@@ -1086,6 +1118,7 @@ void fitMesh::solveAllShape(const ceres::Solver::Options& options, const double 
 		}
 		else
 		{
+			//must store points in scanPts, since NormalCostFunctor will not copy points data
 			scanPts.push_back(shuffleANDfilter(curScan.vPts, tempbody.nPoints, &idxMapper[0], nullptr));
 			auto cost_function = new ceres::NumericDiffCostFunction<ShapeCostFunctor, ceres::CENTRAL, EVALUATE_POINTS_NUM, SHAPEPARAM_NUM>
 				(new ShapeCostFunctor(&shapepose, modelParams[b], validNN, scanPts.back()));
@@ -1181,13 +1214,13 @@ void fitMesh::predictPose()
 	printf("solving joints: %zu iters, %e --> %e\n", summary.iterations.size(), summary.initial_cost, summary.final_cost);
 	//cout << summary.FullReport();
 	
-	//printf("normal predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
 	for (uint32_t a = 0; a < 6; ++a)
+		//prediction on global rotate and movement is vital, since they had big impact on every points
 		predMParam.pose[a] = PosePredictor::Calc::calcute(npp[a], curFrame);
 	for (uint32_t a = 6; a < POSPARAM_NUM; ++a)
+		//do not directly use calculated data, since prediction is not accurate, especially for joints
+		//prediction on joints is only used for faster converge in solving
 		predMParam.pose[a] = (JointPredictor::Calc::calcute(npp[a], curFrame) + curMParam.pose[a] * 2) / 3;
-	//printf("poly-n predict: %f,%f,%f,%f,%f,%f\n", curMParam.pose[0], curMParam.pose[1], curMParam.pose[2], curMParam.pose[3], curMParam.pose[4], curMParam.pose[5]);
-	//getchar();
 	predMParam.shape = curMParam.shape;
 }
 void fitMesh::predSoftPose(const bool solveGlobal)
@@ -1323,6 +1356,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		logger.log(true, "avxNN uses %lld ms.\n", timer.ElapseMs());
 		idxs.resize(tempbody.nPoints);
 		memcpy(idxs.data(), nnres.idxs.data(), sizeof(int32_t) * tempbody.nPoints);
+		//some links should be deleted
 		weights = nnFilter(nnres, isValidNN, scan.vNorms, angLim);
 	}
 
@@ -1341,6 +1375,7 @@ uint32_t fitMesh::updatePoints(const CScan& scan, const ModelParam& mPar, const 
 		logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, err);
 	}
 
+	//save match data for BodyReconstructoHelper
 	FILE *fp = fopen("output.data", "wb");
 	if (fp != nullptr)
 	{
@@ -1430,6 +1465,7 @@ uint32_t fitMesh::updatePointsRe(const CScan & scan, const ModelParam & mPar, co
 		logger.log(true, "valid nn number: %d , total error: %f\n", sumVNN, distAll);
 	}
 
+	//save match data for BodyReconstructoHelper
 	FILE *fp = fopen("output.data", "wb");
 	if (fp != nullptr)
 	{
@@ -1593,6 +1629,11 @@ void fitMesh::mainProcess()
 				v.addText("frame0", 100, 0, 12, 1, 0, 0, "frame");
 			});
 		}
+		{
+			tempbody.calcFaces();
+			tempbody.calcNormalsEx();
+			showResult(firstScan, true);
+		}
 		option.use_nonmonotonic_steps = true;
 		for (uint32_t a = 0; a < 10; ++a)
 			fitparams.push_back(FitParam{ true, true, 0, (1 - std::log(0.65 + 0.35 * a / 10)) * angleLimit, option });
@@ -1648,7 +1689,7 @@ void fitMesh::mainProcess()
 			fitShapePose(curScan, fitparams);
 		modelParams.push_back(curMParam);
 	}
-	{
+	{//report each function's time consumption, used for profiling
 		printf("\n\n");
 		printf("Re----- : per %lld ns\n", ftm_time[0] / ftm_count[0]);
 		printf("ReShift : per %lld ns\n", ftm_time[1] / ftm_count[0]);
@@ -1671,6 +1712,7 @@ void fitMesh::mainProcess()
 			//prepare fit params
 			option.use_nonmonotonic_steps = true;
 			fitparams.clear();
+			//for final-fit, only pose OR shape can be solved at a time
 			fitparams.push_back(FitParam{ true, false, 0, angleLimit * 1.4f, option });
 			fitparams.push_back(FitParam{ true, false, 0b1, angleLimit * 1.3f, option });
 			fitparams.push_back(FitParam{ false, true, 0, angleLimit * 1.2f, option });
@@ -1812,6 +1854,8 @@ void fitMesh::watch()
 	printf("return -scan switch\n");
 	printf("ESC    -quit\n");
 	printf("L/R    -previous/next frame\n");
+	printf("O      -model without joints' impact\n");
+	printf("P      -model with zero-pose param\n");
 	printf("\n");
 	curFrame = 0;
 

@@ -550,6 +550,7 @@ bool CMesh::readModel(const char* aFilename, bool smooth)
 	return true;
 }
 
+//evectors are shpae params' impact on points
 //evectors are dense, which means no shortcut could be taken for speedup
 void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 {
@@ -572,10 +573,14 @@ void CMesh::setShapeSpaceEigens(const arma::mat & evectorsIn)
 		evecCache->resize(EVALUATE_POINTS_NUM * SHAPEPARAM_NUM * 3 / 4);
 		for (uint32_t pn = 0; pn < SHAPEPARAM_NUM; pn += 4)
 		{
+			/*evectors is 20[params]*19347(6449[points]*3[dimension])
+			 *evecCache is 5 * 6449(points) * 3(xyz) * 4(4param)
+			 *4 params are stored in a vertex, 4 vertexs stand for 4 points' param on x, then y,z.
+			**/ 
 			const double *tpx = evectorsIn.memptr() + pn, *tpy = tpx + gap, *tpz = tpy + gap;
 			for (uint32_t ptn = EVALUATE_POINTS_NUM / 4; ptn--;)
 			{
-				//4 points a group---2AVX
+				//4 points a group---2AVX for loop unrolling
 				evecCache->at(i++).load<4>(tpx);
 				evecCache->at(i++).load<4>(tpx + 20);
 				evecCache->at(i++).load<4>(tpx + 40);
@@ -606,6 +611,7 @@ void CMesh::prepareData()
 	{//prepare weightMatrix
 		uint32_t wMatGap = (mNumPoints + 7) / 8;// at least for AVX--32byte boundary, 8 float
 		wMatGap *= 2; //wMatGap means each joint's weight matrix has how many Vertex(1 Vertex for 4 points)
+		//weightmatrix is points' contributions to the each joint's position
 		miniBLAS::VertexVec wgtMat(wMatGap*mJointNumber);
 		memset(&wgtMat[0], 0x0, wMatGap*mJointNumber * sizeof(Vertex));
 		const float *pWM = weightMatrix.data();
@@ -645,7 +651,7 @@ void CMesh::prepareData()
 			sumvec = _mm256_add_ps(sumvec, _mm256_permute2f128_ps(sumvec, sumvec, 0x01));
 			const auto sumwgt = _mm256_castps256_ps128(sumvec);// total weights
 			for (auto& infl : s2j.influence)
-				infl.assign(_mm_div_ps(infl, sumwgt));//finally get actual weights
+				infl.assign(_mm_div_ps(infl, sumwgt));//finally get actual weights after div
 		}
 	}
 	uint32_t allsmtcnt = 0;

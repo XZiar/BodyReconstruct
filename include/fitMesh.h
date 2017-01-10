@@ -43,7 +43,6 @@ struct CScan : public ModelBase
     arma::mat normals;
     arma::mat normals_faces;
     arma::mat landmarks;
-    arma::mat T;//rigid transform to the template
     std::vector<uint32_t> sample_point_idxes;
     //cv::flann::Index *kdtree;
 
@@ -62,6 +61,7 @@ struct CTemplate : public ModelBase
 	std::vector<FastTriangle, miniBLAS::AlignAllocator<FastTriangle>> vFaces;
 
 	void init(const arma::mat& p, const arma::mat& f);
+	void init(uint32_t ptCount, miniBLAS::VertexVec&& pts, const arma::mat& f);
 	void updPoints();
 	void updPoints(miniBLAS::VertexVec&& pts);
 	void calcFaces();

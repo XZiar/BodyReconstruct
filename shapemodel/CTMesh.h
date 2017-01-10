@@ -170,6 +170,7 @@ public:
 
 	void setShapeSpaceEigens(const arma::mat &evectorsIn);
 	void prepareData();
+	uint32_t getPointsCount() const { return mNumPoints; }
 	/*pre-compute mesh data based on validmask
 	 *when we can determine some points invalid inmatch(it will not be used in final cost calculation),
 	 *we can avoid calculating these points in rigidMotion step and just output useful points data

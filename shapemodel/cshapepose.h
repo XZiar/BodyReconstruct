@@ -20,6 +20,7 @@ public:
 	CShapePose(const std::string& modelFileName);
 	/*pre-compute mesh data based on validmask*/
 	PtrModSmooth preCompute(const int8_t *__restrict validMask) const { return initMesh_bk.preCompute(validMask); };
+	uint32_t getMeshPointCount() const { return initMesh_bk.getPointsCount(); }
 	/*For pose-solving, shape param remains unchanged, hence fitShapeChangesToMesh and updJoint can be calc only once
 	 *Function return a CMesh, which can be passed to getModelByPose
 	 **/

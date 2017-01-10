@@ -31,7 +31,7 @@ protected:
 		return ((const CHILD&)(*this)).judgeIdx(v);
 	};
 public:
-	float MAXDist2 = 3e4f;
+	float MAXDist2 = 5e4f;
 	NNTreeBase() = default;
 	~NNTreeBase() = default;
 	/*points should contain its index in w, though they may be the same as its index in vector*/
