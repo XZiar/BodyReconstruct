@@ -249,7 +249,7 @@ void SimpleLog::flush()
 {
 	if (fp == nullptr)
 		fp = fopen(fname.c_str(), "w");
-	fprintf(fp, cache.c_str());
+	fprintf(fp, "%s", cache.c_str());
 	cache = "";
 }
 
@@ -387,7 +387,7 @@ bool fitMesh::loadScan(CScan& scan)
 
 	printf("loading %s ...\n", fname.c_str());
 	const int read_status = pcl::io::loadPLYFile(fname, cloud_tmp);
-	printf("read status: %d, load %lld points AND normals.\n", read_status, cloud_tmp.points.size());
+	printf("read status: %d, load %zu points AND normals.\n", read_status, cloud_tmp.points.size());
 
 	scan.nPoints = cloud_tmp.points.size();
 	scan.points_orig.resize(scan.nPoints, 3);
@@ -1014,8 +1014,6 @@ void fitMesh::fitFinal(const std::vector<FitParam>& fitparams)
 	tSPose = tSShape = tMatchNN = 0;
 	cSPose = cSShape = cMatchNN = 0;
 
-	bool solvedS = false, solvedP = false;
-
 	Solver::Options options;
 	options.minimizer_type = ceres::TRUST_REGION;
 	options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
@@ -1302,7 +1300,7 @@ void fitMesh::raytraceCut(miniBLAS::NNResult& res) const
 std::vector<float> fitMesh::nnFilter(const miniBLAS::NNResult& res, arColIS& isValid, const VertexVec& scNorms, const double angLim)
 {
 	vector<float> weights;
-	isValid.swap(arColIS(tempbody.nPoints, 0));
+	isValid = arColIS(tempbody.nPoints, 0);
 	/*limcos is half of the cos of angleLimit, which means angles less than half of angleLimit are accurate and get no penalty*/
 	const float mincos = cos(M_PI * angLim / 180), limcos = cos(M_PI_2 * angleLimit / 180), cosInv = 1.0 / limcos;
 	for (uint32_t i = 0; i < tempbody.nPoints; i++)
@@ -1657,7 +1655,7 @@ void fitMesh::mainProcess()
 	}
 	if (isRE)
 		isReShift = yesORno("use ReMin for allowing shift?");
-	int leastframe = inputNumber("at least fit to which frame?", 0);
+	uint32_t leastframe = inputNumber("at least fit to which frame?", 0);
 	{
 		//prepare fit params
 		fitparams.clear();

@@ -130,6 +130,7 @@ struct AlignBase
 };
 
 /*minimun allocator for vector, use T's operator new to alloc space. Should be used with AlignBase*/
+/*
 template<class T>
 struct AlignAllocator : std::allocator<T>
 {
@@ -148,19 +149,44 @@ public:
 
 	T* allocate(size_t n, const T *hint = 0)
 	{
-		T* ptr = new T[n];
+		T *ptr = (T*)T::operator new(n * sizeof(T));
 		return ptr;
 	}
 	void deallocate(T *p, size_t n)
 	{
-		delete[] p;
+		T::operator delete(p);
 	}
 	size_t max_size() const noexcept
 	{
 		return ((size_t)(-1) / sizeof(T));
 	}
-};
+};*/
 
+template <class T>
+struct AlignAllocator
+{
+	typedef T value_type;
+	AlignAllocator() noexcept { }
+	template<class U> AlignAllocator(const AlignAllocator<U>&) noexcept { }
+
+	template<class U> bool operator==(const AlignAllocator<U>&) const noexcept
+	{
+		return true;
+	}
+	template<class U> bool operator!=(const AlignAllocator<U>&) const noexcept
+	{
+		return false;
+	}
+	T* allocate(const size_t n) const
+	{
+		T *ptr = (T*)T::operator new(n * sizeof(T));
+		return ptr;
+	}
+	void deallocate(T* const p, size_t) const noexcept
+	{
+		T::operator delete(p);
+	}
+};
 
 class ALIGN16 Vertex;
 class ALIGN16 VertexI;

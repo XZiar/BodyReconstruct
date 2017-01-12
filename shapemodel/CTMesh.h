@@ -21,6 +21,7 @@
 #define CMeshH
 
 #include "main.h"
+#include <mutex>
 
 #include "CMatrix.h"
 #include "CTensor.h"
@@ -83,7 +84,7 @@ protected:
  *Cjoint is based on CVector, which will cost lots of time when copying(allocate&free heap wastefully)
  *This version use Vertex instead(data stores on stack)
  */
-ALIGN16 struct CJointEx
+struct ALIGN16 CJointEx
 {
 public:
 	// constructor
@@ -150,6 +151,7 @@ using PtrModSmooth = std::shared_ptr<ModelSmooth>;
 class CMesh
 {
 public:
+	static std::once_flag initialized;
 	static atomic_uint64_t functime[8];
 	static atomic_uint32_t funccount[8];
 	constexpr static uint32_t mJointNumber = POSPARAM_NUM - 6;
@@ -161,6 +163,13 @@ public:
 
 	CMesh()
 	{
+		std::call_once(initialized, []() 
+		{
+			for (auto& ft : functime)
+				ft.store(0);
+			for (auto& fc : funccount)
+				fc.store(1);
+		});
 		evecCache.reset(new miniBLAS::VertexVec());
 		modsmooth.reset(new ModelSmooth());
 		sh2jnt.reset(new std::array<ShapeJointParam, 14>());

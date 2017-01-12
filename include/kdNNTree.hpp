@@ -140,6 +140,7 @@ void NNTreeBase<CHILD>::searchBasic(const Vertex *__restrict pVert, const uint32
 	}
 }
 
+/*output dists are length, not square of length*/
 template<typename CHILD>
 void NNTreeBase<CHILD>::search(const Vertex *pVert, const uint32_t count, int *__restrict idxs, float *__restrict dists) const
 {
@@ -245,7 +246,7 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 	{
 		if (*idxs > 65530)//fast skip
 		{
-			*idxs++;
+			idxs++;
 			*dists++ = 1e10f;
 			continue;
 		}
@@ -330,17 +331,18 @@ void NNTreeBase<CHILD>::searchOnAngle(NNResult& ret, const VertexVec& pt, const 
 		{
 			IDX = theIDX[idx1]; DIST = theDIST[idx1];
 		}
-		*dists++ = DIST;
+		*dists = DIST;
 		if (DIST > MAXDist2)
-			*idxs++ = 65536;
+			*idxs = 65536;
 		else
 		{
-			*idxs++ = IDX;
+			*idxs = IDX;
 			ret.mthcnts[IDX]++;
 			DIST *= 1.25f;//1.12*1.12
 			if (ret.mdists[IDX] > DIST)
 				ret.mdists[IDX] = DIST;
 		}
+		idxs++; dists++;
 	}
 }
 
@@ -358,7 +360,7 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 	{
 		if (*idxs > 65530)//fast skip
 		{
-			*idxs++;
+			idxs++;
 			*dists++ = 1e10f;
 			continue;
 		}
@@ -455,17 +457,18 @@ void NNTreeBase<CHILD>::searchOnAnglePan(NNResult& ret, const VertexVec& pt, con
 		{
 			IDX = theIDX[idx1]; DIST = theDIST[idx1];
 		}
-		*dists++ = DIST;
+		*dists = DIST;
 		if (DIST > MAXDist2)
-			*idxs++ = 65536;
+			*idxs = 65536;
 		else
 		{
-			*idxs++ = IDX;
+			*idxs = IDX;
 			ret.mthcnts[IDX]++;
 			DIST *= d2threshold;
 			if (ret.mdists[IDX] > DIST)
 				ret.mdists[IDX] = DIST;
 		}
+		idxs++; dists++;
 	}
 }
 

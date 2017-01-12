@@ -39,17 +39,21 @@ INCLUDEPATH += \
 
 LIBS += /usr/local/lib/libboost_system.so \
         /usr/local/lib/libarmadillo.so \
-        /usr/local/lib/libceres.a \
         /usr/local/lib/libglog.so \
         /usr/local/lib/libcblas.a \
+        /usr/local/lib/libceres.a \
         /usr/lib/gcc/x86_64-linux-gnu/5/libgfortran.so \
-        -lgomp
+        /usr/local/lib/libvtkCommonCore-7.0.so \
+        /usr/local/lib/libvtkCommonDataModel-7.0.so \
+        /usr/local/lib/libvtkCommonMath-7.0.so \
+        /usr/local/lib/libvtkRenderingCore-7.0.so \
+        -lgomp \
+        -lpthread
 
 QMAKE_CXXFLAGS += -mavx
 QMAKE_CXXFLAGS += -g
 
 PKGCONFIG += pcl_io-1.8
 PKGCONFIG += pcl_visualization-1.8
-PKGCONFIG += pcl_keypoints-1.8
 PKGCONFIG += lapack
 PKGCONFIG += blas

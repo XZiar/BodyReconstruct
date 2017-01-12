@@ -256,8 +256,9 @@ miniBLAS::SQMat4x4 CJointEx::angleToMatrixEx(const float aAngle) const
 const uint8_t CMesh::idxmap[14][3] = //i0,i1,i1*3
 { { 2,0,0 },{ 3,2,6 },{ 4,3,9 },{ 6,0,0 },{ 7,6,18 },{ 8,7,21 },{ 10,0,0 },{ 11,10,30 }, { 14,10,30 },{ 15,14,42 },{ 16,15,45 },{ 19,10,30 },{ 20,19,57 },{ 21,20,60 } };
 
-atomic_uint64_t CMesh::functime[8] = { 0 };
-atomic_uint32_t CMesh::funccount[8] = { 1,1,1,1,1,1,1,1 };
+std::once_flag CMesh::initialized;
+atomic_uint64_t CMesh::functime[8];// { 0, 0, 0, 0, 0, 0, 0, 0 };
+atomic_uint32_t CMesh::funccount[8];// { 1, 1, 1, 1, 1, 1, 1, 1 };
 // operator=
 void CMesh::operator=(const CMesh& aMesh)
 {

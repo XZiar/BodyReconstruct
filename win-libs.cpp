@@ -8,7 +8,7 @@
 
 #ifdef _DEBUG
 
-#pragma comment(lib, R"(zlibd.lib)")
+//#pragma comment(lib, R"(zlibd.lib)")
 #pragma comment(lib, R"(ceresd.lib)")
 #pragma comment(lib, R"(armadillod.lib)")
 #pragma comment(lib, R"(superlu\cblasd.lib)")
@@ -22,7 +22,7 @@
 
 #else
 
-#pragma comment(lib, R"(zlib.lib)")
+//#pragma comment(lib, R"(zlib.lib)")
 #pragma comment(lib, R"(ceres.lib)")
 #pragma comment(lib, R"(armadillo.lib)")
 #pragma comment(lib, R"(superlu\cblas.lib)")

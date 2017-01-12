@@ -14,7 +14,7 @@ void printMat(const char *str, const arma::mat& m);
 void printMatAll(const char *str, const arma::mat& m);
 
 /*used for store information of triangles for ray-tracing*/
-ALIGN16 struct FastTriangle : public miniBLAS::AlignBase<32>
+struct ALIGN16 FastTriangle : public miniBLAS::AlignBase<32>
 {
 	miniBLAS::Vertex p0, axisu, axisv, norm;
 	miniBLAS::VertexI pidx;
@@ -125,7 +125,7 @@ public:
 	std::vector<ModelParam> modelParams;
 
 	volatile uint32_t curFrame = 0;
-	volatile std::atomic_bool isEnd, isAnimate, isShowScan = true, isRefresh = true, isShowOrigin = false, isBlockPose = false;
+	volatile std::atomic_bool isEnd{false}, isAnimate{false}, isShowScan{true}, isRefresh{true}, isShowOrigin{false}, isBlockPose{false};
 	SimpleLog logger;
 
 	bool isFastCost = true;
