@@ -89,30 +89,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="shapemodel\cshapepose.cpp" />
-    <ClCompile Include="shapemodel\CTMesh-30DOF.cpp" />
-    <ClCompile Include="shapemodel\NMath.cpp" />
-    <ClCompile Include="shapemodel\NRBM.cpp" />
-    <ClCompile Include="shapemodel\paramMap.cpp" />
-    <ClCompile Include="shapemodel\Show.cpp" />
-    <ClCompile Include="src\fitMesh.cpp" />
-    <ClCompile Include="src\tools.cpp" />
-    <ClCompile Include="win-libs.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="include\fitMesh.h" />
-    <ClInclude Include="include\kdNNTree.hpp" />
-    <ClInclude Include="include\miniBLAS.hpp" />
-    <ClInclude Include="include\solverModel.hpp" />
-    <ClInclude Include="include\tools.h" />
-    <ClInclude Include="main.h" />
-    <ClInclude Include="shapemodel\CMatrix.h" />
-    <ClInclude Include="shapemodel\cshapepose.h" />
-    <ClInclude Include="shapemodel\CTMesh.h" />
-    <ClInclude Include="shapemodel\CVector.h" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
