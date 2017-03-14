@@ -1,13 +1,36 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio 15
+VisualStudioVersion = 15.0.26228.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstruct", "BodyReconstruct.vcxproj", "{61419CEC-8DBF-400A-8484-3496B162D8C6}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstructHelper", "..\BodyReconstructHelper\BodyReconstructHelper.vcxproj", "{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BodyReconstructWin", "BodyReconstructWin.vcxproj", "{6ABCF070-DCE8-4F17-A201-CA765B024C03}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OpenGLUtil", "..\..\RayRenderer\OpenGLUtil\OpenGLUtil.vcxproj", "{CC937530-6B2A-4538-B764-71DFE8D84C89}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FreeGLUTView", "..\..\RayRenderer\FreeGLUTView\FreeGLUTView.vcxproj", "{944B3981-336E-4807-B5BE-55B8F05920D4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3dBasic", "3dBasic", "{466E08B2-06C2-48DA-9F9E-9A59A057730C}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\RayRenderer\3DBasic\3dElement.hpp = ..\..\RayRenderer\3DBasic\3dElement.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS.hpp = ..\..\RayRenderer\3DBasic\miniBLAS.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS.natvis = ..\..\RayRenderer\3DBasic\miniBLAS.natvis
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "BasicLibrary", "BasicLibrary", "{C8C4EF60-3011-47AD-B7C7-B0B1B4407803}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "miniBLAS", "miniBLAS", "{B4184A38-D20D-4ADF-8A7A-561F2EE4C0CC}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\RayRenderer\3DBasic\miniBLAS\BLASrely.h = ..\..\RayRenderer\3DBasic\miniBLAS\BLASrely.h
+		..\..\RayRenderer\3DBasic\miniBLAS\Mat3x3.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\Mat3x3.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\Mat4x4.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\Mat4x4.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\MatBase.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\MatBase.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\Vec3.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\Vec3.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\Vec4.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\Vec4.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\VecBase.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\VecBase.hpp
+		..\..\RayRenderer\3DBasic\miniBLAS\VecI4.hpp = ..\..\RayRenderer\3DBasic\miniBLAS\VecI4.hpp
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -23,20 +46,35 @@ Global
 		{61419CEC-8DBF-400A-8484-3496B162D8C6}.Release|x64.ActiveCfg = Release|x64
 		{61419CEC-8DBF-400A-8484-3496B162D8C6}.Release|x64.Build.0 = Release|x64
 		{61419CEC-8DBF-400A-8484-3496B162D8C6}.Release|x86.ActiveCfg = Release|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Debug|x64.ActiveCfg = Debug|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Debug|x64.Build.0 = Debug|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Debug|x86.ActiveCfg = Debug|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x64.ActiveCfg = Release|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x64.Build.0 = Release|x64
-		{C4EDE081-2A55-4D80-A853-FDC6A2FCCBB8}.Release|x86.ActiveCfg = Release|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x64.ActiveCfg = Debug|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x64.Build.0 = Debug|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Debug|x86.ActiveCfg = Debug|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x64.ActiveCfg = Release|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x64.Build.0 = Release|x64
 		{6ABCF070-DCE8-4F17-A201-CA765B024C03}.Release|x86.ActiveCfg = Release|x64
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Debug|x64.ActiveCfg = Debug|x64
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Debug|x64.Build.0 = Debug|x64
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Debug|x86.ActiveCfg = Debug|Win32
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Debug|x86.Build.0 = Debug|Win32
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Release|x64.ActiveCfg = Release|x64
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Release|x64.Build.0 = Release|x64
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Release|x86.ActiveCfg = Release|Win32
+		{CC937530-6B2A-4538-B764-71DFE8D84C89}.Release|x86.Build.0 = Release|Win32
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Debug|x64.ActiveCfg = Debug|x64
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Debug|x64.Build.0 = Debug|x64
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Debug|x86.ActiveCfg = Debug|Win32
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Debug|x86.Build.0 = Debug|Win32
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Release|x64.ActiveCfg = Release|x64
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Release|x64.Build.0 = Release|x64
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Release|x86.ActiveCfg = Release|Win32
+		{944B3981-336E-4807-B5BE-55B8F05920D4}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{CC937530-6B2A-4538-B764-71DFE8D84C89} = {C8C4EF60-3011-47AD-B7C7-B0B1B4407803}
+		{944B3981-336E-4807-B5BE-55B8F05920D4} = {C8C4EF60-3011-47AD-B7C7-B0B1B4407803}
+		{B4184A38-D20D-4ADF-8A7A-561F2EE4C0CC} = {466E08B2-06C2-48DA-9F9E-9A59A057730C}
 	EndGlobalSection
 EndGlobal
